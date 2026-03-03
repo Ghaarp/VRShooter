@@ -1,0 +1,8 @@
+{
+	"SourceFiles": [
+		"F:\\proj\\VRShooter\\Source\\VRShooter\\VRShooter.Build.cs",
+		"F:\\proj\\VRShooter\\Source\\VRShooter.Target.cs",
+		"F:\\proj\\VRShooter\\Source\\VRShooterEditor.Target.cs"
+	],
+	"EngineVersion": "5.7.3"
+}
