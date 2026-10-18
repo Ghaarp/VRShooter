@@ -3,10 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "VRLocomotion.generated.h"
 
 class UInputComponent;
+class UCameraComponent;
+class USceneComponent;
+class IVRLocomotionControllable;
+class APawn;
+
 class UInputAction;
 struct FInputActionValue;
 
@@ -20,6 +24,7 @@ public:
 	UVRLocomotion();
 
 	void BindPlayerInput(UInputComponent* PlayerInputComponent);
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
 	// Called when the game starts
@@ -35,11 +40,30 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input|Actions")
 	UInputAction* JumpAction;
 
+	UPROPERTY(EditAnywhere, Category = "Movement settings")
+	float RotationRate = 45.f;
+
+	// Linked Components --------------------------------
+	UPROPERTY()
+	UCameraComponent* CameraComponent;
+
+	UPROPERTY()
+	USceneComponent* CameraRoot;
+
+	UPROPERTY()
+	TScriptInterface<IVRLocomotionControllable> Owner;
+
 private:
 
 	// Functions ----------------------------------------
 	void Walk(const FInputActionValue& Value);
 	void Turn(const FInputActionValue& Value);
 	void Jump();
-	
+
+	void MoveActorOnly(FVector Offset);
+	void TurnActorOnly(float Amount);
+
+	void SetActorCoordsWithHMDOffset(float DeltaTime);
+	void SetActorRotationWithHMDRotation(float DeltaTime);
+
 };

@@ -8,9 +8,12 @@ public class VRShooter : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG", "Slate", "SlateCore", "AnimGraphRuntime", "BlueprintGraph", "Niagara", "RigVM", "ControlRig", "AnimGraph", "XRBase" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] {  });
+        PrivateDependencyModuleNames.AddRange(new string[] { "HeadMountedDisplay" });
+
+        PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore", "GraphEditor", "PropertyEditor", "EditorStyle", "AnimGraph" });
+
         PrivateIncludePaths.AddRange(
            new string[] {
               "VRShooter",
