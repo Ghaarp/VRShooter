@@ -37,7 +37,14 @@ ABasicPlayer::ABasicPlayer() : ACharacter()
 
     ABasicPlayer::GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
 	
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	LocomotionComponent->AddTickPrerequisiteComponent(Movement);
+	FullBodyMesh->AddTickPrerequisiteComponent(Movement);
 	FullBodyMesh->AddTickPrerequisiteComponent(LocomotionComponent);
+
+	LocomotionComponent->SetTickGroup(TG_PrePhysics);
+	FullBodyMesh->SetTickGroup(TG_PostPhysics);
+	FullBodyMesh->PrimaryComponentTick.EndTickGroup = TG_PostPhysics;
 }
 
 FVector ABasicPlayer::GetMeshForwardVector() const
