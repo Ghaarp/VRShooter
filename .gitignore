@@ -361,3 +361,28 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Unreal Engine generated project files and local build output
+/Binaries/
+/DerivedDataCache/
+/Intermediate/
+/Saved/
+/*.sln
+/*.slnx
+
+# Generated data for project plugins; retain plugin source and shipped binaries
+/Plugins/**/Intermediate/
+/Plugins/**/DerivedDataCache/
+/Plugins/**/Saved/
+
+# Local IDE settings
+.idea/
+.vscode/
+*.VC.opendb
+
+# Crash dumps and operating system metadata
+*.dmp
+*.stackdump
+.DS_Store
+Thumbs.db
+Desktop.ini
