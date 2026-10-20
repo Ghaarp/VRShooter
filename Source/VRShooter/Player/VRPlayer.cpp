@@ -12,22 +12,21 @@
 #include "Components/CapsuleComponent.h"
 #include "XRMotionControllerBase.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 AVRPlayer::AVRPlayer() : ABasicPlayer()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	CameraRoot = CreateDefaultSubobject<USceneComponent>(TEXT("VRCameraRoot"));
-	CameraRoot->SetupAttachment(GetRootComponent());
+	VROrigin = CreateDefaultSubobject<USceneComponent>(TEXT("VRCameraRoot"));
+	VROrigin->SetupAttachment(GetRootComponent());
 	if (CameraComponent)
-		CameraComponent->SetupAttachment(CameraRoot);
+		CameraComponent->SetupAttachment(VROrigin);
 	//CameraRoot->SetupAttachment(PublicPlayerMesh, FName("VRCameraRoot"));
 	
 	VRControllerComponent = CreateDefaultSubobject<UVRControllerComponent>(TEXT("VR controller component"));
 	VRControllerComponent->SetAutoActivate(true);
-
-	MotionControllerRoot = CreateDefaultSubobject<USceneComponent>(TEXT("VRMotionControllerRoot"));
-	MotionControllerRoot->SetupAttachment(CameraRoot);
+	VRControllerComponent->AddTickPrerequisiteComponent(GetCharacterMovement());
 
 	// VR Hands
 	LeftMotionController = CreateDefaultSubobject<UMotionControllerComponent>(TEXT("LeftController"));
@@ -58,7 +57,7 @@ FPhysicsBasedHand AVRPlayer::InitPhysicsBasedHand(
 
 	FPhysicsBasedHand Result(MotionController, MotionControllerPosition, Constraint, MotionControllerSimulated, DisableCapsuleCollision, Capsule);
 
-	Result.MotionController->SetupAttachment(MotionControllerRoot);
+	Result.MotionController->SetupAttachment(VROrigin);
 	Result.MotionController->MotionSource = MotionSource;
 	
 	Result.MotionControllerPosition->SetupAttachment(Result.MotionController);
@@ -144,8 +143,15 @@ FTransform AVRPlayer::CalculateSimulatedHandTransform(const FPhysicsBasedHand& H
 	HandTransform.SetScale3D(FVector(1, 1, 1));
 
 	FTransform BaseTransform = FullBodyMesh->GetComponentTransform();
-	BaseTransform.AddToTranslation(FVector(0, 0, MotionControllerRoot->GetComponentLocation().Z - BaseTransform.GetLocation().Z));
-
+	FTransform Result = HandTransform * BaseTransform.Inverse();
+	if (&Hand == &LeftHand)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Left Hand Transform: Location = %s, Rotation = %s"), *HandTransform.GetLocation().ToString(), *HandTransform.GetRotation().Rotator().ToString());
+	}
+	else if (&Hand == &RightHand)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Right Hand Transform: Location = %s, Rotation = %s"), *HandTransform.GetLocation().ToString(), *HandTransform.GetRotation().Rotator().ToString());
+	}
 	return HandTransform * BaseTransform.Inverse();
 }
 

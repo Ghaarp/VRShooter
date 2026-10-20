@@ -91,7 +91,7 @@ public:
 
 	// IVRControllable interface
 	virtual UCameraComponent* GetCamera() const override { return Super::GetCamera(); };
-	USceneComponent* GetCameraRoot() const override { return CameraRoot; };
+	USceneComponent* GetVROrigin() const override { return VROrigin; };
 	USceneComponent* GetMotionControllerRoot() const override { return MotionControllerRoot; };
 
 	FVRControllableSocketTransform GetVRViewPoint() override;
@@ -120,7 +120,7 @@ protected:
 
 	// Components ---------------------------------------
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<USceneComponent> CameraRoot;
+	TObjectPtr<USceneComponent> VROrigin;
 
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UVRControllerComponent> VRControllerComponent;

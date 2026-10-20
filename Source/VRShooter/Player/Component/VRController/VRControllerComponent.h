@@ -75,7 +75,7 @@ protected:
 	UCameraComponent* CameraComponent;
 
 	UPROPERTY()
-	USceneComponent* CameraRoot;
+	USceneComponent* VROrigin;
 
 	UPROPERTY()
 	USceneComponent* MotionControllerRoot;
@@ -96,6 +96,7 @@ private:
 	void TurnActorOnly(float Amount);
 
 	void UpdateHMDTransform();
+	void PrepareCameraOrigin();
 	void SetActorLocationWithHMDOffset(float DeltaTime);
 	void SetActorRotationWithHMDRotation(float DeltaTime);
 	

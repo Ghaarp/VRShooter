@@ -45,7 +45,7 @@ class VRSHOOTER_API IVRControllable
 public:
 
 	virtual UCameraComponent* GetCamera() const PURE_VIRTUAL(IVRControllable::GetCamera, return nullptr;);
-	virtual USceneComponent* GetCameraRoot() const PURE_VIRTUAL(IVRControllable::GetCameraRoot, return nullptr;);
+	virtual USceneComponent* GetVROrigin() const PURE_VIRTUAL(IVRControllable::GetVROrigin, return nullptr;);
 	virtual USceneComponent* GetMotionControllerRoot() const PURE_VIRTUAL(IVRControllable::GetMotionControllerRoot, return nullptr;);
 
 	virtual void AddActorWorldRotation(FRotator Input) PURE_VIRTUAL(IVRControllable::AddActorWorldRotation, );

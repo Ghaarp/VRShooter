@@ -2,6 +2,9 @@
 
 
 #include "Player/Component/VRController/VRControllerComponent.h"
+
+#include <ntstatus.h>
+
 #include "Player/Component/VRController/Interface/VRControllable.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -72,7 +75,7 @@ void UVRControllerComponent::BeginPlay()
 	Owner.SetInterface(OwnerItem);
 
 	CameraComponent = Owner->GetCamera();
-	CameraRoot = Owner->GetCameraRoot();
+	VROrigin = Owner->GetVROrigin();
 	MotionControllerRoot = Owner->GetMotionControllerRoot();
 }
 
@@ -84,22 +87,24 @@ void UVRControllerComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	{
 		UpdateHMDTransform();
 		SetActorLocationWithHMDOffset(DeltaTime);
-		SetActorRotationWithHMDRotation(DeltaTime);		
+		SetActorRotationWithHMDRotation(DeltaTime);
+		UpdateVRCamera();
 	}
 	
 }
 
 void UVRControllerComponent::SecondaryTick(float DeltaTime)
 {
+	/*
 	if(!bDisableVRCamera)
-		UpdateVRCamera();
+	{}	
 
 	if (MotionControllerRoot && CameraRoot)
 	{
 		FVector RootPosition = CameraRoot->GetComponentLocation();
 		RootPosition.Z += Owner->GetIKOffset();
-		MotionControllerRoot->SetWorldLocation(RootPosition, false);
-	}
+		//MotionControllerRoot->SetWorldLocation(RootPosition, false);
+	}*/
 		
 }
 
@@ -120,7 +125,7 @@ void UVRControllerComponent::BindPlayerInput(UInputComponent* PlayerInputCompone
 
 void UVRControllerComponent::Turn(const FInputActionValue& Value)
 {
-	if (!CameraComponent || !CameraRoot)
+	if (!CameraComponent || !VROrigin)
 		return;
 
 	if (!bDisableVRCamera)
@@ -128,15 +133,15 @@ void UVRControllerComponent::Turn(const FInputActionValue& Value)
 		FVector2D TurnVector = Value.Get<FVector2D>();
 		float DeltaAxis = TurnVector.X;
 
-		FVector RootLocation = CameraRoot->GetComponentLocation();
+		FVector RootLocation = VROrigin->GetComponentLocation();
 		FVector CameraLocation = CameraComponent->GetComponentLocation();
 
 		FVector DeltaLocation = RootLocation - CameraLocation;
 		float DeltaTime = GetWorld()->GetDeltaSeconds();
 		float Angle = RotationRate * DeltaAxis * DeltaTime;
 		FVector NewOriginLoc = DeltaLocation.RotateAngleAxis(Angle, FVector(0, 0, 1));
-		CameraRoot->SetWorldLocation(CameraLocation + NewOriginLoc);
-		CameraRoot->AddRelativeRotation(FRotator(0, Angle, 0));
+		VROrigin->SetWorldLocation(CameraLocation + NewOriginLoc);
+		VROrigin->AddRelativeRotation(FRotator(0, Angle, 0));
 		TurnActorOnly(Angle);
 	}
 	else
@@ -149,22 +154,22 @@ void UVRControllerComponent::Turn(const FInputActionValue& Value)
 		float AngleX = RotationRate * DeltaAxisX * DeltaTime;
 		float AngleY = RotationRate * DeltaAxisY * DeltaTime;
 
-		CameraRoot->AddRelativeRotation(FRotator(AngleY, AngleX, 0));
+		VROrigin->AddRelativeRotation(FRotator(AngleY, AngleX, 0));
 	}
 	
 }
 
 void UVRControllerComponent::TurnActorOnly(float Amount)
 {
-	FTransform Transform = CameraRoot->GetComponentTransform();
+	FTransform Transform = VROrigin->GetComponentTransform();
 	Owner->AddActorWorldRotation(FRotator(0, Amount, 0));
-	CameraRoot->SetWorldTransform(Transform);
+	VROrigin->SetWorldTransform(Transform);
 }
 
 void UVRControllerComponent::MoveActorOnly(FVector Offset)
 {
 	Owner->AddActorWorldOffset(Offset);
-	CameraRoot->AddWorldOffset(-Offset);
+	VROrigin->AddWorldOffset(-Offset);
 }
 
 // Tick functions -------------------------------------------------------------------------------------------------------------
@@ -180,14 +185,14 @@ void UVRControllerComponent::UpdateHMDTransform()
 
 void UVRControllerComponent::SetActorLocationWithHMDOffset(float DeltaTime)
 {
-	if (!CameraRoot || !Owner.GetInterface())
+	if (!VROrigin || !Owner.GetInterface())
 		return;
 
 	FVRControllableSocketTransform ViewPointTransform = Owner->GetVRViewPoint();
 	if (!ViewPointTransform.bIsSocketFound)
 		return;
 
-	FVector HMDWorldLocation = CameraRoot->GetComponentTransform().TransformPosition(HMDTransform.GetLocation());
+	FVector HMDWorldLocation = VROrigin->GetComponentTransform().TransformPosition(HMDTransform.GetLocation());
 	FVector ViewPointLocation = ViewPointTransform.SocketTransform.GetLocation();
 	FVector HMDOffset = HMDWorldLocation - ViewPointLocation;
 
@@ -214,9 +219,10 @@ void UVRControllerComponent::SetActorRotationWithHMDRotation(float DeltaTime)
 
 void UVRControllerComponent::UpdateVRCamera()
 {
-	if (!CameraRoot || !CameraComponent)
+	if (!VROrigin || !CameraComponent)
 		return;
 
+	/*
 	FVRControllableSocketTransform ViewPointTransform = Owner->GetVRViewPoint();
 	if (!ViewPointTransform.bIsSocketFound)
 		return;
@@ -227,6 +233,23 @@ void UVRControllerComponent::UpdateVRCamera()
 	FVector Offset = FVector(0, 0, ViewPointLocation.Z - CameraLocation.Z);
 
 	CameraRoot->AddWorldOffset(Offset);
-	CameraComponent->SetWorldLocation(CameraLocation);
+	CameraComponent->SetWorldLocation(CameraLocation);*/
+	
+	FVRControllableSocketTransform ViewPointTransform = Owner->GetVRViewPoint();
+	if (!ViewPointTransform.bIsSocketFound)
+		return;
+	
+	FVector ViewPointLocation = ViewPointTransform.SocketTransform.GetLocation();
+	
+	const FTransform Origin = VROrigin->GetComponentTransform();
+	const FVector HeadOffset =
+		Origin.TransformVector(HMDTransform.GetLocation());
+
+	FVector DesiredOrigin =
+		ViewPointLocation - HeadOffset;
+	
+	DesiredOrigin.X = Origin.GetLocation().X;
+	DesiredOrigin.Y = Origin.GetLocation().Y;
+	VROrigin->SetWorldLocation(DesiredOrigin);
 }
 
