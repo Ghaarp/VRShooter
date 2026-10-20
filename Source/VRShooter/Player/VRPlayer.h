@@ -96,7 +96,7 @@ public:
 
 	FVRControllableSocketTransform GetVRViewPoint() override;
 	virtual void AddActorWorldRotation(FRotator Input) override { Super::AddActorWorldRotation(Input);};
-	virtual void AddActorWorldOffset(FVector Offset) override { Super::AddActorWorldOffset(Offset); };
+	virtual void AddActorWorldOffset(FVector Offset) override { Super::AddActorWorldOffset(Offset, true); };
 	virtual FTransform GetActorTransform() const override { return Super::GetActorTransform(); }
 	virtual FTransform GetHMDTransform() const override;
 

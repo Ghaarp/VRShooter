@@ -168,8 +168,9 @@ void UVRControllerComponent::TurnActorOnly(float Amount)
 
 void UVRControllerComponent::MoveActorOnly(FVector Offset)
 {
+	FTransform SavedOriginTransform = VROrigin->GetComponentTransform();
 	Owner->AddActorWorldOffset(Offset);
-	VROrigin->AddWorldOffset(-Offset);
+	VROrigin->SetWorldTransform(SavedOriginTransform);
 }
 
 // Tick functions -------------------------------------------------------------------------------------------------------------
