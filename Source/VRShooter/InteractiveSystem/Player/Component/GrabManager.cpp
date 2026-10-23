@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "InteractiveSystem/Component/Player/GrabManager.h"
+#include "InteractiveSystem/Player/Component/GrabManager.h"
 
 // Sets default values for this component's properties
 UGrabManager::UGrabManager()

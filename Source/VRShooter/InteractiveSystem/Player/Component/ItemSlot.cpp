@@ -1,10 +1,10 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "GrabSocket.h"
+#include "InteractiveSystem/Player/Component/ItemSlot.h"
 
 // Sets default values for this component's properties
-UGrabSocket::UGrabSocket()
+UItemSlot::UItemSlot()
 {
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
@@ -15,7 +15,7 @@ UGrabSocket::UGrabSocket()
 
 
 // Called when the game starts
-void UGrabSocket::BeginPlay()
+void UItemSlot::BeginPlay()
 {
 	Super::BeginPlay();
 
@@ -25,7 +25,7 @@ void UGrabSocket::BeginPlay()
 
 
 // Called every frame
-void UGrabSocket::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UItemSlot::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 

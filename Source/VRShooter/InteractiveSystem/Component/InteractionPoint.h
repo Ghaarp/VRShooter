@@ -4,17 +4,18 @@
 
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
-#include "GrabSocket.generated.h"
+#include "InteractiveSystem/Interface/InteractablePoint.h"
+#include "InteractionPoint.generated.h"
 
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class VRSHOOTER_API UGrabSocket : public USceneComponent
+class VRSHOOTER_API UInteractionPoint : public USceneComponent, public IInteractablePoint
 {
 	GENERATED_BODY()
 
 public:	
 	// Sets default values for this component's properties
-	UGrabSocket();
+	UInteractionPoint();
 
 protected:
 	// Called when the game starts

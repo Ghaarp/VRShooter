@@ -4,11 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
-#include "Grabbable.generated.h"
+#include "InteractionMaster.generated.h"
 
 // This class does not need to be modified.
 UINTERFACE(MinimalAPI)
-class UGrabbable : public UInterface
+class UInteractionMaster : public UInterface
 {
 	GENERATED_BODY()
 };
@@ -16,7 +16,7 @@ class UGrabbable : public UInterface
 /**
  * 
  */
-class VRSHOOTER_API IGrabbable
+class VRSHOOTER_API IInteractionMaster
 {
 	GENERATED_BODY()
 

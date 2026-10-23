@@ -4,11 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
-#include "GrabManagerCompatible.generated.h"
+#include "InteractableMasterPoint.generated.h"
 
 // This class does not need to be modified.
 UINTERFACE(MinimalAPI)
-class UGrabManagerCompatible : public UInterface
+class UInteractableMasterPoint : public UInterface
 {
 	GENERATED_BODY()
 };
@@ -16,7 +16,7 @@ class UGrabManagerCompatible : public UInterface
 /**
  * 
  */
-class VRSHOOTER_API IGrabManagerCompatible
+class VRSHOOTER_API IInteractableMasterPoint
 {
 	GENERATED_BODY()
 

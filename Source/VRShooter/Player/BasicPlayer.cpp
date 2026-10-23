@@ -5,7 +5,7 @@
 #include "Player/Component/Locomotion/LocomotionComponent.h"
 #include "Player/Component/IK/LowerBodyIKHelper.h"
 #include "Player/Component/IK/UpperBodyIKHelper.h"
-#include "InteractiveSystem/Component/Player/GrabManager.h"
+//#include "InteractiveSystem/Component/Player/GrabManager.h"
 
 #include "Components/CapsuleComponent.h"
 #include "Camera/CameraComponent.h"
@@ -32,8 +32,8 @@ ABasicPlayer::ABasicPlayer() : ACharacter()
 	UpperBodyIKHelper = CreateDefaultSubobject<UUpperBodyIKHelper>(TEXT("Upper body IK calculator"));
 	UpperBodyIKHelper->SetAutoActivate(true);
 
-	GrabManager = CreateDefaultSubobject<UGrabManager>(TEXT("Grab manager"));
-	GrabManager->SetAutoActivate(true);
+	//GrabManager = CreateDefaultSubobject<UGrabManager>(TEXT("Grab manager"));
+	//GrabManager->SetAutoActivate(true);
 
     ABasicPlayer::GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
 	

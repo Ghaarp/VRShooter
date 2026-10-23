@@ -8,7 +8,7 @@
 #include "Player/Component/Locomotion/Interface/LocomotionCompatible.h"
 #include "Player/Component/IK/Interface/LowerIKCompatible.h"
 #include "Player/Component/IK/Interface/UpperIKCompatible.h"
-#include "InteractiveSystem/Component/Player/Interface/GrabManagerCompatible.h"
+//#include "InteractiveSystem/Component/Player/Interface/GrabManagerCompatible.h"
 #include "BasicPlayer.generated.h"
 
 class USkeletalMeshComponent;
@@ -24,8 +24,8 @@ UCLASS()
 class VRSHOOTER_API ABasicPlayer : public ACharacter, 
 	public ILocomotionCompatible, 
 	public ILowerIKCompatible, 
-	public IUpperIKCompatible,
-	public IGrabManagerCompatible
+	public IUpperIKCompatible
+	//public IGrabManagerCompatible
 {
 	GENERATED_BODY()
 
@@ -87,8 +87,8 @@ protected:
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UUpperBodyIKHelper> UpperBodyIKHelper;
 
-	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UGrabManager> GrabManager;
+	//UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	//TObjectPtr<UGrabManager> GrabManager;
 
 	// Settings  ----------------------------------------
 	UPROPERTY(VisibleDefaultsOnly, Category = "Settings")
