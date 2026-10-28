@@ -13,6 +13,7 @@ class UMotionControllerComponent;
 class UStaticMeshComponent;
 class UPhysicsConstraintComponent;
 class UCapsuleComponent;
+class UHandSlot;
 
 struct FInputActionValue;
 
@@ -129,6 +130,12 @@ protected:
 	TObjectPtr<USceneComponent> MotionControllerRoot;
 
 	// VR Hands -----------------------------------------
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<UHandSlot> LeftHandSlot;
+
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<UHandSlot> RightHandSlot;
+
 	UPROPERTY(meta = (AllowPrivateAccess = "true"))
 	FPhysicsBasedHand LeftHand;
 
@@ -176,5 +183,8 @@ protected:
 	);
 
 	// Common
+	void CreateHandSlot(TObjectPtr<UHandSlot>& Slot, FName SlotName,
+		InteractablePointHand Hand, UStaticMeshComponent* SimulatedHand);
+
 	FTransform CalculateSimulatedHandTransform(const FPhysicsBasedHand& Hand) const;
 };

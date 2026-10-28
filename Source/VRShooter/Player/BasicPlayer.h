@@ -4,13 +4,16 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "InteractiveSystem/Interface/InteractionMaster.h"
+#include "InteractiveSystem/Interface/GrabManagerCompatible.h"
+#include "InteractiveSystem/Common/Enums.h"
 
 #include "Player/Component/Locomotion/Interface/LocomotionCompatible.h"
 #include "Player/Component/IK/Interface/LowerIKCompatible.h"
 #include "Player/Component/IK/Interface/UpperIKCompatible.h"
-//#include "InteractiveSystem/Component/Player/Interface/GrabManagerCompatible.h"
 #include "BasicPlayer.generated.h"
 
+class UInventorySlot;
 class USkeletalMeshComponent;
 class UCameraComponent;
 class ULocomotionComponent;
@@ -24,8 +27,9 @@ UCLASS()
 class VRSHOOTER_API ABasicPlayer : public ACharacter, 
 	public ILocomotionCompatible, 
 	public ILowerIKCompatible, 
-	public IUpperIKCompatible
-	//public IGrabManagerCompatible
+	public IUpperIKCompatible,
+	public IInteractionMaster,
+	public IGrabManagerCompatible
 {
 	GENERATED_BODY()
 
@@ -65,7 +69,12 @@ public:
 	virtual FVector GetMeshForwardVector() const override;
 	virtual float GetMeshToCapsuleYawOffset() const override;
 	virtual FVector GetAimPoint() const override;
+	
+	// IInteractionMaster interface -------------------------------------
+	virtual USkeletalMeshComponent* GetFullBodyMesh() const override { return FullBodyMesh; };
 
+	// IGrabManagerCompatible interface ---------------------------------
+	virtual UGrabManager* GetGrabManager() const override { return GrabManager; }
 
 protected:
 	// Called when the game starts or when spawned
@@ -87,8 +96,20 @@ protected:
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UUpperBodyIKHelper> UpperBodyIKHelper;
 
-	//UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
-	//TObjectPtr<UGrabManager> GrabManager;
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UGrabManager> GrabManager;
+	
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<UInventorySlot> LeftBeltSlot;
+
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<UInventorySlot> RightBeltSlot;
+
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<UInventorySlot> LeftSpineSlot;
+
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<UInventorySlot> RightSpineSlot;
 
 	// Settings  ----------------------------------------
 	UPROPERTY(VisibleDefaultsOnly, Category = "Settings")
@@ -101,7 +122,12 @@ protected:
 	float MaxRunningSpeed = 375.f;
 
 	// Functions ----------------------------------------
+	void CreateInteractionComponents();
 
+	template <typename TSlot>
+	void CreateItemSlot(TObjectPtr<TSlot>& Slot,
+		FName SlotName, InteractablePointType PointType,
+		InteractablePointHand PointHand = InteractablePointHand::None);
 	// Props --------------------------------------------
 	UPROPERTY()
 	float IKOffset = 0.f;

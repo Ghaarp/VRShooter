@@ -12,6 +12,11 @@ public class VRShooter : ModuleRules
 
         PrivateDependencyModuleNames.AddRange(new string[] { "HeadMountedDisplay" });
 
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.Add("UnrealEd");
+        }
+
         PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore", "GraphEditor", "PropertyEditor", "EditorStyle", "AnimGraph" });
 
         PrivateIncludePaths.AddRange(

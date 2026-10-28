@@ -10,6 +10,8 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "Camera/CameraComponent.h"
+#include "InteractiveSystem/Interface/GrabManagerCompatible.h"
+#include "InteractiveSystem/Player/Component/GrabManager.h"
 
 // Sets default values for this component's properties
 UVRControllerComponent::UVRControllerComponent()
@@ -62,6 +64,8 @@ FString FSecondaryTickFunction::DiagnosticMessage()
 void UVRControllerComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	if (const IGrabManagerCompatible* GrabOwner = Cast<IGrabManagerCompatible>(GetOwner()))
+		GrabManager = GrabOwner->GetGrabManager();
 
 	IVRControllable* OwnerItem = GetOwner<IVRControllable>();
 
@@ -121,6 +125,55 @@ void UVRControllerComponent::BindPlayerInput(UInputComponent* PlayerInputCompone
 	}
 
 	EnhancedInputComponent->BindAction(TurnAction, ETriggerEvent::Triggered, this, &UVRControllerComponent::Turn);
+	bLeftGrabActive = false;
+	bRightGrabActive = false;
+	if (LeftGrabAction)
+	{
+		EnhancedInputComponent->BindAction(LeftGrabAction, ETriggerEvent::Triggered, this, &UVRControllerComponent::HandleGrabInput, InteractablePointHand::Left);
+		EnhancedInputComponent->BindAction(LeftGrabAction, ETriggerEvent::Completed, this, &UVRControllerComponent::ResetGrabInput, InteractablePointHand::Left);
+		EnhancedInputComponent->BindAction(LeftGrabAction, ETriggerEvent::Canceled, this, &UVRControllerComponent::ResetGrabInput, InteractablePointHand::Left);
+	}
+	if (RightGrabAction)
+	{
+		EnhancedInputComponent->BindAction(RightGrabAction, ETriggerEvent::Triggered, this, &UVRControllerComponent::HandleGrabInput, InteractablePointHand::Right);
+		EnhancedInputComponent->BindAction(RightGrabAction, ETriggerEvent::Completed, this, &UVRControllerComponent::ResetGrabInput, InteractablePointHand::Right);
+		EnhancedInputComponent->BindAction(RightGrabAction, ETriggerEvent::Canceled, this, &UVRControllerComponent::ResetGrabInput, InteractablePointHand::Right);
+	}
+}
+
+void UVRControllerComponent::HandleGrabInput(const FInputActionValue& Value, InteractablePointHand Hand)
+{
+	bool& bGrabActive = Hand == InteractablePointHand::Left ? bLeftGrabActive : bRightGrabActive;
+	const bool bAboveThreshold = Value.Get<float>() >= GrabThreshold;
+	const bool bStartGrab = bAboveThreshold && !bGrabActive;
+	const bool bReleaseGrab = !bAboveThreshold && bGrabActive;
+	bGrabActive = bAboveThreshold;
+	if (bStartGrab)
+		Grab(Hand);
+	else if (bReleaseGrab)
+		Release(Hand);
+}
+
+void UVRControllerComponent::ResetGrabInput(InteractablePointHand Hand)
+{
+	bool& bGrabActive = Hand == InteractablePointHand::Left ? bLeftGrabActive : bRightGrabActive;
+	if (!bGrabActive)
+		return;
+
+	bGrabActive = false;
+	Release(Hand);
+}
+
+void UVRControllerComponent::Grab(InteractablePointHand Hand)
+{
+	if (GrabManager)
+		GrabManager->Grab(Hand);
+}
+
+void UVRControllerComponent::Release(InteractablePointHand Hand)
+{
+	if (GrabManager)
+		GrabManager->Release(Hand);
 }
 
 void UVRControllerComponent::Turn(const FInputActionValue& Value)
@@ -222,19 +275,6 @@ void UVRControllerComponent::UpdateVRCamera()
 {
 	if (!VROrigin || !CameraComponent)
 		return;
-
-	/*
-	FVRControllableSocketTransform ViewPointTransform = Owner->GetVRViewPoint();
-	if (!ViewPointTransform.bIsSocketFound)
-		return;
-
-	FVector CameraLocation = CameraComponent->GetComponentLocation();
-	FVector ViewPointLocation = ViewPointTransform.SocketTransform.GetLocation();
-
-	FVector Offset = FVector(0, 0, ViewPointLocation.Z - CameraLocation.Z);
-
-	CameraRoot->AddWorldOffset(Offset);
-	CameraComponent->SetWorldLocation(CameraLocation);*/
 	
 	FVRControllableSocketTransform ViewPointTransform = Owner->GetVRViewPoint();
 	if (!ViewPointTransform.bIsSocketFound)

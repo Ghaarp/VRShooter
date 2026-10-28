@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/EngineBaseTypes.h"
+#include "InteractiveSystem/Common/Enums.h"
 #include "VRControllerComponent.generated.h"
 
 class IVRControllable;
@@ -14,6 +15,7 @@ class USceneComponent;
 class APawn;
 
 class UInputAction;
+class UGrabManager;
 struct FInputActionValue;
 
 USTRUCT()
@@ -64,6 +66,16 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input|Actions")
 	UInputAction* TurnAction;
 
+	UPROPERTY(EditAnywhere, Category = "Input|Actions")
+	UInputAction* LeftGrabAction = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = "Input|Actions")
+	UInputAction* RightGrabAction = nullptr;
+
+	// Shared analog grip threshold for both hands, on a scale from 0 to 1.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Settings", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float GrabThreshold = 0.8f;
+
 	UPROPERTY(EditAnywhere, Category = "Movement settings")
 	float RotationRate = 15.f;
 
@@ -80,6 +92,9 @@ protected:
 	UPROPERTY()
 	USceneComponent* MotionControllerRoot;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UGrabManager> GrabManager = nullptr;
+
 	UPROPERTY()
 	TScriptInterface<IVRControllable> Owner;
 
@@ -89,8 +104,15 @@ private:
 	UPROPERTY()
 	FTransform HMDTransform;
 
+	bool bLeftGrabActive = false;
+	bool bRightGrabActive = false;
+
 	// Functions ----------------------------------------
 	void Turn(const FInputActionValue& Value);
+	void HandleGrabInput(const FInputActionValue& Value, InteractablePointHand Hand);
+	void ResetGrabInput(InteractablePointHand Hand);
+	void Grab(InteractablePointHand Hand);
+	void Release(InteractablePointHand Hand);
 
 	void MoveActorOnly(FVector Offset);
 	void TurnActorOnly(float Amount);

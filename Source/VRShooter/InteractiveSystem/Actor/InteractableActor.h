@@ -7,7 +7,7 @@
 #include "InteractiveSystem/Interface/Interactable.h"
 #include "InteractableActor.generated.h"
 
-UCLASS()
+UCLASS(Abstract)
 class VRSHOOTER_API AInteractableActor : public AActor, public IInteractable
 {
 	GENERATED_BODY()
@@ -20,8 +20,13 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
+	InteractionActorType ActorType = InteractionActorType::None;
+	
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+
+	virtual InteractionActorType GetInteractionActorType() const override { return ActorType; }
 
 };

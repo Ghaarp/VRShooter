@@ -13,6 +13,9 @@
 #include "XRMotionControllerBase.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "InteractiveSystem/Player/Component/HandSlot.h"
 
 AVRPlayer::AVRPlayer() : ABasicPlayer()
 {
@@ -43,6 +46,20 @@ AVRPlayer::AVRPlayer() : ABasicPlayer()
 
 	LeftHand = InitPhysicsBasedHand(FXRMotionControllerBase::LeftHandSourceId, LeftMotionController, LeftMotionControllerPosition, LeftConstraint, LeftMotionControllerSimulated, LeftDisableCapsuleCollision, GetCapsuleComponent());
 	RightHand = InitPhysicsBasedHand(FXRMotionControllerBase::RightHandSourceId, RightMotionController, RightMotionControllerPosition, RightConstraint, RightMotionControllerSimulated, RightDisableCapsuleCollision, GetCapsuleComponent());
+
+	CreateHandSlot(LeftHandSlot, TEXT("Left hand slot"), InteractablePointHand::Left, LeftMotionControllerSimulated);
+	CreateHandSlot(RightHandSlot, TEXT("Right hand slot"), InteractablePointHand::Right, RightMotionControllerSimulated);
+}
+
+void AVRPlayer::CreateHandSlot(TObjectPtr<UHandSlot>& Slot, FName SlotName,
+	InteractablePointHand Hand, UStaticMeshComponent* SimulatedHand)
+{
+	Slot = CreateDefaultSubobject<UHandSlot>(SlotName);
+	Slot->SetPointType(InteractablePointType::Hand);
+	Slot->SetPointHand(Hand);
+	Slot->SetPhysicalHand(SimulatedHand);
+	Slot->SetAutoActivate(true);
+	Slot->SetupAttachment(FullBodyMesh);
 }
 
 FPhysicsBasedHand AVRPlayer::InitPhysicsBasedHand( 
@@ -143,15 +160,6 @@ FTransform AVRPlayer::CalculateSimulatedHandTransform(const FPhysicsBasedHand& H
 	HandTransform.SetScale3D(FVector(1, 1, 1));
 
 	FTransform BaseTransform = FullBodyMesh->GetComponentTransform();
-	FTransform Result = HandTransform * BaseTransform.Inverse();
-	if (&Hand == &LeftHand)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Left Hand Transform: Location = %s, Rotation = %s"), *HandTransform.GetLocation().ToString(), *HandTransform.GetRotation().Rotator().ToString());
-	}
-	else if (&Hand == &RightHand)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("Right Hand Transform: Location = %s, Rotation = %s"), *HandTransform.GetLocation().ToString(), *HandTransform.GetRotation().Rotator().ToString());
-	}
 	return HandTransform * BaseTransform.Inverse();
 }
 

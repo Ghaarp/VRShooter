@@ -5,11 +5,13 @@
 #include "Player/Component/Locomotion/LocomotionComponent.h"
 #include "Player/Component/IK/LowerBodyIKHelper.h"
 #include "Player/Component/IK/UpperBodyIKHelper.h"
-//#include "InteractiveSystem/Component/Player/GrabManager.h"
 
 #include "Components/CapsuleComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "InteractiveSystem/Player/Component/GrabManager.h"
+#include "InteractiveSystem/Player/Component/InventorySlot.h"
+#include "InteractiveSystem/Player/Component/ItemSlot.h"
 
 
 // Sets default values
@@ -32,9 +34,6 @@ ABasicPlayer::ABasicPlayer() : ACharacter()
 	UpperBodyIKHelper = CreateDefaultSubobject<UUpperBodyIKHelper>(TEXT("Upper body IK calculator"));
 	UpperBodyIKHelper->SetAutoActivate(true);
 
-	//GrabManager = CreateDefaultSubobject<UGrabManager>(TEXT("Grab manager"));
-	//GrabManager->SetAutoActivate(true);
-
     ABasicPlayer::GetCapsuleComponent()->InitCapsuleSize(55.f, 96.0f);
 	
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
@@ -45,6 +44,9 @@ ABasicPlayer::ABasicPlayer() : ACharacter()
 	LocomotionComponent->SetTickGroup(TG_PrePhysics);
 	FullBodyMesh->SetTickGroup(TG_PostPhysics);
 	FullBodyMesh->PrimaryComponentTick.EndTickGroup = TG_PostPhysics;
+	
+	// Interactions
+	CreateInteractionComponents();
 }
 
 FVector ABasicPlayer::GetMeshForwardVector() const
@@ -78,6 +80,30 @@ void ABasicPlayer::BeginPlay()
 {
 	Super::BeginPlay();
 	UpdateWalkRun(false);
+}
+
+template <typename TSlot>
+void ABasicPlayer::CreateItemSlot(TObjectPtr<TSlot>& Slot,
+	FName SlotName, InteractablePointType PointType,
+	InteractablePointHand PointHand)
+{
+	Slot = CreateDefaultSubobject<TSlot>(SlotName);
+	Slot->SetPointType(PointType);
+	Slot->SetPointHand(PointHand);
+	Slot->SetAutoActivate(true);
+	Slot->SetupAttachment(FullBodyMesh);
+
+}
+
+void ABasicPlayer::CreateInteractionComponents()
+{
+	GrabManager = CreateDefaultSubobject<UGrabManager>(TEXT("Grab manager"));
+	GrabManager->SetAutoActivate(true);
+
+	CreateItemSlot(LeftBeltSlot, TEXT("Left belt slot"), InteractablePointType::Outer);
+	CreateItemSlot(RightBeltSlot, TEXT("Right belt slot"), InteractablePointType::Outer);
+	CreateItemSlot(LeftSpineSlot, TEXT("Left spine slot"), InteractablePointType::Outer);
+	CreateItemSlot(RightSpineSlot, TEXT("Right spine slot"), InteractablePointType::Outer);
 }
 
 // Called every frame

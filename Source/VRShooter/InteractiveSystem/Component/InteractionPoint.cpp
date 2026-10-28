@@ -2,15 +2,14 @@
 
 
 #include "InteractiveSystem/Component/InteractionPoint.h"
+#include "GameFramework/Actor.h"
+#include "InteractiveSystem/Component/DetectionSphereSlave.h"
+#include "InteractiveSystem/Component/InteractionPointSocket.h"
 
 // Sets default values for this component's properties
 UInteractionPoint::UInteractionPoint()
 {
-	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
-	// off to improve performance if you don't need them.
-	PrimaryComponentTick.bCanEverTick = true;
-
-	// ...
+	PrimaryComponentTick.bCanEverTick = false;
 }
 
 
@@ -19,16 +18,40 @@ void UInteractionPoint::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// ...
-	
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	const FName DetectionName = MakeUniqueObjectName(Owner, UDetectionSphereSlave::StaticClass(),
+		FName(*(GetName() + TEXT("_DetectionSphere"))));
+	DetectionSphere = NewObject<UDetectionSphereSlave>(Owner, DetectionName, RF_Transient);
+	Owner->AddInstanceComponent(DetectionSphere);
+	DetectionSphere->SetupAttachment(this);
+	DetectionSphere->SetSphereRadius(DetectionRadius);
+	DetectionSphere->RegisterComponent();
+
+	Sockets.Reset();
+	for (USceneComponent* Child : GetAttachChildren())
+	{
+		if (UInteractionPointSocket* Socket = Cast<UInteractionPointSocket>(Child))
+		{
+			Sockets.Add(Socket);
+			Socket->SetParent(this);
+		}
+	}
 }
 
 
-// Called every frame
-void UInteractionPoint::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UInteractionPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	// ...
+	Sockets.Reset();
+	if (IsValid(DetectionSphere))
+	{
+		DetectionSphere->DestroyComponent();
+	}
+	DetectionSphere = nullptr;
+	Super::EndPlay(EndPlayReason);
 }
 

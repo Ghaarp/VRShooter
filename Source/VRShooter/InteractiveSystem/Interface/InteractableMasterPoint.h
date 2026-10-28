@@ -3,12 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/Interface.h"
+#include "InteractiveSystem/Common/Enums.h"
+#include "InteractablePoint.h"
 #include "InteractableMasterPoint.generated.h"
 
 // This class does not need to be modified.
 UINTERFACE(MinimalAPI)
-class UInteractableMasterPoint : public UInterface
+class UInteractableMasterPoint : public UInteractablePoint
 {
 	GENERATED_BODY()
 };
@@ -16,10 +17,14 @@ class UInteractableMasterPoint : public UInterface
 /**
  * 
  */
-class VRSHOOTER_API IInteractableMasterPoint
+class VRSHOOTER_API IInteractableMasterPoint : public IInteractablePoint
 {
 	GENERATED_BODY()
 
-	// Add interface functions to this class. This is the class that will be inherited to implement this interface.
 public:
+	
+	virtual InteractablePointType GetInteractablePointType() PURE_VIRTUAL(IInteractableMasterPoint::GetInteractablePointType, return InteractablePointType::None; );
+	virtual InteractablePointHand GetInteractablePointHand() PURE_VIRTUAL(IInteractableMasterPoint::GetInteractablePointHand, return InteractablePointHand::None; );
+	virtual void Weld() PURE_VIRTUAL(IInteractableMasterPoint::Weld, );
+
 };

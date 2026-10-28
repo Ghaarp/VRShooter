@@ -5,6 +5,13 @@
 #include "CoreMinimal.h"
 
 UENUM(BlueprintType)
+enum class InteractionActorType :uint8 {
+	None,
+	OneHanded,
+	TwoHanded,
+};
+
+UENUM(BlueprintType)
 enum class InteractablePointType :uint8 {
 	None,
 	Hand,

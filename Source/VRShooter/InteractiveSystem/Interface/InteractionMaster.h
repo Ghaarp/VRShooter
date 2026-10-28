@@ -20,6 +20,7 @@ class VRSHOOTER_API IInteractionMaster
 {
 	GENERATED_BODY()
 
-	// Add interface functions to this class. This is the class that will be inherited to implement this interface.
 public:
+	
+	virtual USkeletalMeshComponent* GetFullBodyMesh() const PURE_VIRTUAL(IInteractionMaster, return nullptr;);
 };
