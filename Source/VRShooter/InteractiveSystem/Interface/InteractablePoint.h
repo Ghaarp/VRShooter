@@ -3,8 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "InteractiveSystem/Common/Enums.h"
 #include "UObject/Interface.h"
 #include "InteractablePoint.generated.h"
+
+class AActor;
 
 UINTERFACE(MinimalAPI)
 class UInteractablePoint : public UInterface
@@ -16,5 +19,9 @@ class VRSHOOTER_API IInteractablePoint
 {
 	GENERATED_BODY()
 	
-	virtual InteractablePointType GetInteractablePointType() PURE_VIRTUAL(IInteractableSlavePoint::GetInteractablePointType, return InteractablePointType::None; );
+public:
+	virtual InteractablePointType GetInteractablePointType() PURE_VIRTUAL(IInteractablePoint::GetInteractablePointType, return InteractablePointType::None; );
+	virtual FVector GetPointLocation() const PURE_VIRTUAL(IInteractablePoint::GetPointLocation, return FVector::ZeroVector; );
+	virtual AActor* GetPointOwner() const PURE_VIRTUAL(IInteractablePoint::GetPointOwner, return nullptr; );
+	virtual bool IsInventorySlot() const { return false; }
 };

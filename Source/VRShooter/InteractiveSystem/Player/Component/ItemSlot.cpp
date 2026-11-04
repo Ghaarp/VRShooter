@@ -6,6 +6,7 @@
 #include "InteractiveSystem/Interface/InteractionMaster.h"
 #include "InteractiveSystem/Player/Component/DetectionSphereMaster.h"
 #include "GameFramework/Actor.h"
+#include "Net/UnrealNetwork.h"
 
 // Sets default values for this component's properties
 UItemSlot::UItemSlot()
@@ -13,10 +14,23 @@ UItemSlot::UItemSlot()
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = true;
+	SetIsReplicatedByDefault(true);
 
 	// ...
 }
 
+
+void UItemSlot::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(UItemSlot, RequestedInteractionPoint);
+}
+
+void UItemSlot::SetRequestedInteractionPoint(const TScriptInterface<IInteractableSlavePoint>& InPoint)
+{
+	if (GetOwner() && GetOwner()->HasAuthority())
+		RequestedInteractionPoint = InPoint;
+}
 
 // Called when the game starts
 void UItemSlot::BeginPlay()
@@ -73,6 +87,8 @@ void UItemSlot::BeginPlay()
 
 void UItemSlot::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	RequestedInteractionPoint = nullptr;
+
 	if (IsValid(DetectionSphere))
 	{
 		DetectionSphere->DestroyComponent();

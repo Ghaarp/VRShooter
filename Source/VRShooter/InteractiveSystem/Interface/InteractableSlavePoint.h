@@ -25,6 +25,7 @@ class VRSHOOTER_API IInteractableSlavePoint : public IInteractablePoint
 	GENERATED_BODY()
 
 public:
+	virtual bool SupportsHand(InteractablePointHand Hand) const PURE_VIRTUAL(IInteractableSlavePoint::SupportsHand, return false; );
 	
 	virtual bool IsAvailable(IInteractableSlavePoint* ParentPoint) PURE_VIRTUAL(IInteractableSlavePoint::IsAvailable, return false; );
 	

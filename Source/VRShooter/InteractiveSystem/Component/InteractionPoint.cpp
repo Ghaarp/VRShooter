@@ -10,6 +10,21 @@
 UInteractionPoint::UInteractionPoint()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	SetIsReplicatedByDefault(true);
+}
+
+bool UInteractionPoint::SupportsHand(InteractablePointHand Hand) const
+{
+	// Points without hand-specific sockets place no restriction on handedness.
+	if (Sockets.IsEmpty())
+		return true;
+
+	for (const UInteractionPointSocket* Socket : Sockets)
+	{
+		if (IsValid(Socket) && (Socket->GetHand() == InteractablePointHand::None || Socket->GetHand() == Hand))
+			return true;
+	}
+	return false;
 }
 
 

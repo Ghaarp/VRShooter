@@ -386,3 +386,7 @@ FodyWeavers.xsd
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local agent instructions and session context
+/AGENTS.md
+/PROJECT_CONTEXT.md

@@ -22,6 +22,7 @@ class VRSHOOTER_API IInteractableMasterPoint : public IInteractablePoint
 	GENERATED_BODY()
 
 public:
+	virtual bool IsAvailableForInteraction() const { return true; }
 	
 	virtual InteractablePointType GetInteractablePointType() PURE_VIRTUAL(IInteractableMasterPoint::GetInteractablePointType, return InteractablePointType::None; );
 	virtual InteractablePointHand GetInteractablePointHand() PURE_VIRTUAL(IInteractableMasterPoint::GetInteractablePointHand, return InteractablePointHand::None; );

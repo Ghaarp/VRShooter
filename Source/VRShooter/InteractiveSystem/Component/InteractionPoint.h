@@ -18,6 +18,11 @@ class VRSHOOTER_API UInteractionPoint : public USceneComponent, public IInteract
 public:	
 	// Sets default values for this component's properties
 	UInteractionPoint();
+	virtual InteractablePointType GetInteractablePointType() override { return PointType; }
+	virtual FVector GetPointLocation() const override { return GetComponentLocation(); }
+	virtual AActor* GetPointOwner() const override { return GetOwner(); }
+	virtual bool SupportsHand(InteractablePointHand Hand) const override;
+	void SetPointType(InteractablePointType InPointType) { PointType = InPointType; }
 
 protected:
 	// Called when the game starts

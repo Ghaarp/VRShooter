@@ -13,5 +13,7 @@ UCLASS()
 class VRSHOOTER_API UInventorySlot : public UItemSlot
 {
 	GENERATED_BODY()
-	
+
+public:
+	virtual bool IsInventorySlot() const override { return true; }
 };
