@@ -7,6 +7,8 @@
 #include "InteractablePoint.h"
 #include "InteractableMasterPoint.generated.h"
 
+class IInteractableSlavePoint;
+
 // This class does not need to be modified.
 UINTERFACE(MinimalAPI)
 class UInteractableMasterPoint : public UInteractablePoint
@@ -23,9 +25,12 @@ class VRSHOOTER_API IInteractableMasterPoint : public IInteractablePoint
 
 public:
 	virtual bool IsAvailableForInteraction() const { return true; }
+	virtual float GetAttachmentScaleRatio() const { return 1.f; }
 	
 	virtual InteractablePointType GetInteractablePointType() PURE_VIRTUAL(IInteractableMasterPoint::GetInteractablePointType, return InteractablePointType::None; );
 	virtual InteractablePointHand GetInteractablePointHand() PURE_VIRTUAL(IInteractableMasterPoint::GetInteractablePointHand, return InteractablePointHand::None; );
-	virtual void Weld() PURE_VIRTUAL(IInteractableMasterPoint::Weld, );
+	virtual bool Weld(IInteractableSlavePoint* SlavePoint) PURE_VIRTUAL(IInteractableMasterPoint::Weld, return false; );
+	virtual void Unweld(IInteractableSlavePoint* SlavePoint) {}
+	virtual bool IsWeldedTo(const IInteractableSlavePoint* SlavePoint) const { return false; }
 
 };

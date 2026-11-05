@@ -7,7 +7,6 @@
 #include "InteractiveSystem/Interface/InteractableSlavePoint.h"
 #include "InteractionPoint.generated.h"
 
-class UDetectionSphereSlave;
 class UInteractionPointSocket;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -20,11 +19,20 @@ public:
 	UInteractionPoint();
 	virtual InteractablePointType GetInteractablePointType() override { return PointType; }
 	virtual FVector GetPointLocation() const override { return GetComponentLocation(); }
+	virtual FTransform GetPointTransform() const override { return GetComponentTransform(); }
+	virtual float GetInteractionRange() const override { return InteractionRange; }
+	virtual bool IsInteractionEnabled() const override { return IsRegistered() && HasBegunPlay(); }
+	void SetInteractionRange(float InRange) { InteractionRange = FMath::Max(InRange, 0.f); }
 	virtual AActor* GetPointOwner() const override { return GetOwner(); }
+	virtual IInteractable* GetInteractableOwner() override;
+	virtual void Attach(IInteractableMasterPoint* MasterPoint) override;
+	virtual void Detach() override;
 	virtual bool SupportsHand(InteractablePointHand Hand) const override;
 	void SetPointType(InteractablePointType InPointType) { PointType = InPointType; }
 
 protected:
+	virtual void Serialize(FArchive& Ar) override;
+	virtual void PostLoad() override;
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
@@ -34,9 +42,13 @@ public:
 	const TArray<TObjectPtr<UInteractionPointSocket>>& GetSockets() const { return Sockets; }
 
 private:
-	// World-space radius in centimeters, unaffected by actor or component scale.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true", ClampMin = "0.0"))
-	float DetectionRadius = 32.f;
+	// Maximum world-space distance from the hand; zero disables this point.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", Units = "cm"))
+	float InteractionRange = 64.f;
+
+	// Read old Blueprint overrides without retaining collision components.
+	UPROPERTY()
+	float DetectionRadius_DEPRECATED = 32.f;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
 	bool bIsMainPoint = false;
@@ -44,9 +56,6 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
 	InteractablePointType PointType = InteractablePointType::None;
 	
-	UPROPERTY(Transient)
-	TObjectPtr<UDetectionSphereSlave> DetectionSphere;
-
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UInteractionPointSocket>> Sockets;
 	

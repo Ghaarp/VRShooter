@@ -3,14 +3,39 @@
 
 #include "InteractiveSystem/Component/InteractionPoint.h"
 #include "GameFramework/Actor.h"
-#include "InteractiveSystem/Component/DetectionSphereSlave.h"
 #include "InteractiveSystem/Component/InteractionPointSocket.h"
+#include "InteractiveSystem/Interface/Interactable.h"
+#include "InteractiveSystem/Common/InteractionSerializationVersion.h"
 
 // Sets default values for this component's properties
 UInteractionPoint::UInteractionPoint()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
+}
+
+void UInteractionPoint::Serialize(FArchive& Ar)
+{
+	Ar.UsingCustomVersion(FInteractionSerializationVersion::GUID);
+	Super::Serialize(Ar);
+}
+
+void UInteractionPoint::PostLoad()
+{
+	Super::PostLoad();
+	if (GetLinkerCustomVersion(FInteractionSerializationVersion::GUID) < FInteractionSerializationVersion::DistanceBasedDetection)
+		InteractionRange = FMath::Max(DetectionRadius_DEPRECATED, 0.f) + 32.f;
+}
+
+IInteractable* UInteractionPoint::GetInteractableOwner()
+{
+	return Cast<IInteractable>(GetOwner());
+}
+
+void UInteractionPoint::Attach(IInteractableMasterPoint* MasterPoint)
+{
+	if (IInteractable* InteractableOwner = GetInteractableOwner())
+		InteractableOwner->Attach(this, MasterPoint);
 }
 
 bool UInteractionPoint::SupportsHand(InteractablePointHand Hand) const
@@ -27,6 +52,12 @@ bool UInteractionPoint::SupportsHand(InteractablePointHand Hand) const
 	return false;
 }
 
+void UInteractionPoint::Detach()
+{
+	if (IInteractable* InteractableOwner = GetInteractableOwner())
+		InteractableOwner->Detach(this);
+}
+
 
 // Called when the game starts
 void UInteractionPoint::BeginPlay()
@@ -38,14 +69,6 @@ void UInteractionPoint::BeginPlay()
 	{
 		return;
 	}
-
-	const FName DetectionName = MakeUniqueObjectName(Owner, UDetectionSphereSlave::StaticClass(),
-		FName(*(GetName() + TEXT("_DetectionSphere"))));
-	DetectionSphere = NewObject<UDetectionSphereSlave>(Owner, DetectionName, RF_Transient);
-	Owner->AddInstanceComponent(DetectionSphere);
-	DetectionSphere->SetupAttachment(this);
-	DetectionSphere->SetSphereRadius(DetectionRadius);
-	DetectionSphere->RegisterComponent();
 
 	Sockets.Reset();
 	for (USceneComponent* Child : GetAttachChildren())
@@ -61,12 +84,8 @@ void UInteractionPoint::BeginPlay()
 
 void UInteractionPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	Detach();
 	Sockets.Reset();
-	if (IsValid(DetectionSphere))
-	{
-		DetectionSphere->DestroyComponent();
-	}
-	DetectionSphere = nullptr;
 	Super::EndPlay(EndPlayReason);
 }
 

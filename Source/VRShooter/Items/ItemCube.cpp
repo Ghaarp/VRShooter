@@ -6,7 +6,7 @@
 
 AItemCube::AItemCube()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	CubeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CubeMesh"));
 	SetRootComponent(CubeMesh);

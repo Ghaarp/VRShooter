@@ -4,9 +4,9 @@
 #include "InteractiveSystem/Player/Component/ItemSlot.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "InteractiveSystem/Interface/InteractionMaster.h"
-#include "InteractiveSystem/Player/Component/DetectionSphereMaster.h"
 #include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
+#include "InteractiveSystem/Common/InteractionSerializationVersion.h"
 
 // Sets default values for this component's properties
 UItemSlot::UItemSlot()
@@ -20,6 +20,19 @@ UItemSlot::UItemSlot()
 }
 
 
+void UItemSlot::Serialize(FArchive& Ar)
+{
+	Ar.UsingCustomVersion(FInteractionSerializationVersion::GUID);
+	Super::Serialize(Ar);
+}
+
+void UItemSlot::PostLoad()
+{
+	Super::PostLoad();
+	if (GetLinkerCustomVersion(FInteractionSerializationVersion::GUID) < FInteractionSerializationVersion::DistanceBasedDetection)
+		InteractionRange = FMath::Max(DetectionRadius_DEPRECATED, 0.f) + 32.f;
+}
+
 void UItemSlot::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -32,23 +45,18 @@ void UItemSlot::SetRequestedInteractionPoint(const TScriptInterface<IInteractabl
 		RequestedInteractionPoint = InPoint;
 }
 
+float UItemSlot::GetAttachmentScaleRatio() const
+{
+	const IInteractionMaster* InteractionMaster = Cast<IInteractionMaster>(GetOwner());
+	return InteractionMaster ? InteractionMaster->GetScaleRatio() : 1.f;
+}
+
 // Called when the game starts
 void UItemSlot::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Runtime support components belong to the slot, independent of socket setup.
 	AActor* Owner = GetOwner();
-	if (Owner && !IsValid(DetectionSphere))
-	{
-		const FName DetectionName = MakeUniqueObjectName(Owner, UDetectionSphereMaster::StaticClass(),
-			FName(*(GetName() + TEXT("_DetectionSphere"))));
-		DetectionSphere = NewObject<UDetectionSphereMaster>(Owner, DetectionName, RF_Transient);
-		Owner->AddInstanceComponent(DetectionSphere);
-		DetectionSphere->SetupAttachment(this);
-		DetectionSphere->SetSphereRadius(DetectionRadius);
-		DetectionSphere->RegisterComponent();
-	}
 
 	if (SocketName.IsNone())
 	{
@@ -88,12 +96,6 @@ void UItemSlot::BeginPlay()
 void UItemSlot::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	RequestedInteractionPoint = nullptr;
-
-	if (IsValid(DetectionSphere))
-	{
-		DetectionSphere->DestroyComponent();
-	}
-	DetectionSphere = nullptr;
 
 	Super::EndPlay(EndPlayReason);
 }

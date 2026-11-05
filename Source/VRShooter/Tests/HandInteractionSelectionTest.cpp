@@ -5,10 +5,9 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
-#include "InteractiveSystem/Component/DetectionSphereSlave.h"
 #include "InteractiveSystem/Component/InteractionPoint.h"
 #include "InteractiveSystem/Component/InteractionPointSocket.h"
-#include "InteractiveSystem/Player/Component/DetectionSphereMaster.h"
+#include "InteractiveSystem/Player/Component/GrabManager.h"
 #include "InteractiveSystem/Player/Component/HandSlot.h"
 #include "InteractiveSystem/Player/Component/InventorySlot.h"
 
@@ -65,6 +64,12 @@ struct FHandSelectionWorld
 
 	UHandSlot* AddHand(AActor* Actor)
 	{
+		if (!Actor->FindComponentByClass<UGrabManager>())
+		{
+			UGrabManager* Manager = NewObject<UGrabManager>(Actor);
+			Actor->AddInstanceComponent(Manager);
+			Manager->RegisterComponent();
+		}
 		UHandSlot* Hand = AddComponent<UHandSlot>(Actor, FVector::ZeroVector);
 		Hand->SetPointType(InteractablePointType::Hand);
 		Hand->SetPointHand(InteractablePointHand::Left);
@@ -98,6 +103,9 @@ struct FHandSelectionWorld
 		{
 			Actor->DispatchBeginPlay();
 		}
+		for (AActor* Actor : Actors)
+			if (UGrabManager* Manager = Actor->FindComponentByClass<UGrabManager>())
+				Manager->RefreshNearbyInteractionPoints();
 	}
 
 };
@@ -121,14 +129,15 @@ bool FFreeHandSelectionTest::RunTest(const FString& Parameters)
 	Scene.BeginPlay();
 	FInteractionPointResult Result = Hand->FindPointForInteraction();
 
-	// Both centers are outside the hand's 32 cm radius, but the 32 cm spheres intersect.
+	// The default point range preserves the previous 32 + 32 cm reach.
 	TestTrue(TEXT("The nearest compatible slave point is selected"), Result.Point == Cast<IInteractablePoint>(Near));
 	TestFalse(TEXT("A slave point is not an inventory slot"), Result.bIsInventorySlot);
 	TestTrue(TEXT("Finding a candidate leaves the hand free"), Hand->IsHandFree());
 
-	Scene.AddComponent<UDetectionSphereSlave>(Item, FVector::ZeroVector, Far);
+	Near->SetInteractionRange(50.f);
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("Multiple shapes on one point preserve nearest selection"), Result.Point == Cast<IInteractablePoint>(Near));
+	TestTrue(TEXT("A point exactly at its range boundary is excluded"), Result.Point == Cast<IInteractablePoint>(Far));
+	Near->SetInteractionRange(64.f);
 
 	Near->SetRelativeLocation(FVector(1000., 0., 0.));
 	Result = Hand->FindPointForInteraction();
@@ -141,9 +150,9 @@ bool FFreeHandSelectionTest::RunTest(const FString& Parameters)
 	WrongHand->GetSockets()[0]->SetHand(InteractablePointHand::None);
 	Result = Hand->FindPointForInteraction();
 	TestTrue(TEXT("An unrestricted socket supports either hand"), Result.Point == Cast<IInteractablePoint>(WrongHand));
-	Hand->GetDetectionSphere()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WrongHand->SetInteractionRange(0.f);
 	Result = Hand->FindPointForInteraction();
-	TestNull(TEXT("Disabling hand detection returns no point"), Result.Point);
+	TestNull(TEXT("A zero interaction range disables the point immediately"), Result.Point);
 	TestFalse(TEXT("An empty result is not an inventory slot"), Result.bIsInventorySlot);
 	return true;
 }
@@ -215,6 +224,151 @@ bool FOccupiedHandSelectionTest::RunTest(const FString& Parameters)
 	Result = Hand->FindPointForInteraction();
 	TestTrue(TEXT("A destroyed desired point leaves the hand free"), Hand->IsHandFree());
 	TestTrue(TEXT("Selection recovers after the desired item is destroyed"), Result.Point == Cast<IInteractablePoint>(FreePoint));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSamePlayerHeldPointSelectionTest, "VRShooter.Interaction.Selection.SamePlayerHeldPoint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSamePlayerHeldPointSelectionTest::RunTest(const FString& Parameters)
+{
+	FHandSelectionWorld Scene;
+	AActor* Player = Scene.AddActor();
+	UHandSlot* Hand = Scene.AddHand(Player);
+	UHandSlot* OtherHand = Scene.AddHand(Player);
+	OtherHand->SetPointHand(InteractablePointHand::Right);
+	UHandSlot* AnotherPlayerHand = Scene.AddHand(Scene.AddActor());
+	AActor* Item = Scene.AddActor();
+	UInteractionPoint* Grip = Scene.AddPoint(Item, 5.f, InteractablePointType::Hand);
+	UInteractionPoint* OtherGrip = Scene.AddPoint(Item, 10.f, InteractablePointType::Hand);
+	UInventorySlot* Inventory = Scene.AddSlot(Player, 1.f, InteractablePointType::Outer);
+	Scene.BeginPlay();
+	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(Grip));
+
+	FInteractionPointResult Result = Hand->FindPointForInteraction();
+	TestTrue(TEXT("Another point on the same held item remains selectable"), Result.Point == Cast<IInteractablePoint>(OtherGrip));
+	TestFalse(TEXT("The other grip is not an inventory slot"), Result.bIsInventorySlot);
+	TestTrue(TEXT("Selection preserves the other hand's occupancy"), OtherHand->GetRequestedInteractionPoint() == Grip);
+	TestTrue(TEXT("Selection leaves the searching hand free"), Hand->IsHandFree());
+	Result = AnotherPlayerHand->FindPointForInteraction();
+	TestTrue(TEXT("A different player can select the exact held grip"), Result.Point == Cast<IInteractablePoint>(Grip));
+
+	OtherGrip->SetRelativeLocation(FVector(1000., 0., 0.));
+	Result = Hand->FindPointForInteraction();
+	TestNull(TEXT("The exact grip held by the same player's other hand is excluded"), Result.Point);
+	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>());
+	Result = Hand->FindPointForInteraction();
+	TestTrue(TEXT("Releasing the grip immediately makes it selectable"), Result.Point == Cast<IInteractablePoint>(Grip));
+
+	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(OtherGrip));
+	Result = Hand->FindPointForInteraction();
+	TestTrue(TEXT("Holding a different grip on the same item does not exclude the nearest grip"), Result.Point == Cast<IInteractablePoint>(Grip));
+	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>());
+	Inventory->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(Grip));
+	Result = Hand->FindPointForInteraction();
+	TestTrue(TEXT("An inventory slot does not count as the player's other hand"), Result.Point == Cast<IInteractablePoint>(Grip));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteractionCacheRangeTest, "VRShooter.Interaction.Cache.PlayerRanges",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FInteractionCacheRangeTest::RunTest(const FString& Parameters)
+{
+	FHandSelectionWorld Scene;
+	AActor* Player = Scene.AddActor();
+	UHandSlot* Left = Scene.AddHand(Player);
+	UHandSlot* Right = Scene.AddHand(Player);
+	Right->SetRelativeLocation(FVector(1000., 0., 0.));
+	UGrabManager* Manager = Player->FindComponentByClass<UGrabManager>();
+	Manager->SetInteractionDetectionCullingDistance(100.f);
+	AActor* OtherPlayer = Scene.AddActor();
+	OtherPlayer->SetActorLocation(FVector(3000., 0., 0.));
+	UHandSlot* OtherHand = Scene.AddHand(OtherPlayer);
+	UGrabManager* OtherManager = OtherPlayer->FindComponentByClass<UGrabManager>();
+	OtherManager->SetInteractionDetectionCullingDistance(100.f);
+	AActor* Item = Scene.AddActor();
+	UInteractionPoint* NearLeft = Scene.AddPoint(Item, 10.f, InteractablePointType::Hand);
+	UInteractionPoint* NearRight = Scene.AddPoint(Item, 1010.f, InteractablePointType::Hand);
+	UInteractionPoint* Far = Scene.AddPoint(Item, 1500.f, InteractablePointType::Hand);
+	UInteractionPoint* NearOtherPlayer = Scene.AddPoint(Item, 3010.f, InteractablePointType::Hand);
+	Scene.BeginPlay();
+	auto Contains = [](const UGrabManager* Cache, const IInteractablePoint* Point)
+	{
+		return Cache->GetNearbyInteractionPoints().ContainsByPredicate(
+			[Point](const TWeakInterfacePtr<IInteractablePoint>& Entry) { return Entry.Get() == Point; });
+	};
+	TestTrue(TEXT("Both hands use their player's manager"), Left->GetGrabManager() == Manager && Right->GetGrabManager() == Manager);
+	TestTrue(TEXT("The shared cache includes points near either hand"), Contains(Manager, NearLeft) && Contains(Manager, NearRight));
+	TestFalse(TEXT("Points beyond the culling distance are omitted"), Contains(Manager, Far));
+	TestFalse(TEXT("The first player does not use the second player's nearby points"), Contains(Manager, NearOtherPlayer));
+	TestTrue(TEXT("The second player has its own cache"), Contains(OtherManager, NearOtherPlayer) && !Contains(OtherManager, NearLeft));
+	TestTrue(TEXT("Left-hand selection uses its current distance"), Left->FindPointForInteraction().Point == Cast<IInteractablePoint>(NearLeft));
+	TestTrue(TEXT("Right-hand selection uses its current distance"), Right->FindPointForInteraction().Point == Cast<IInteractablePoint>(NearRight));
+	TestTrue(TEXT("The other player selects from its own cache"), OtherHand->FindPointForInteraction().Point == Cast<IInteractablePoint>(NearOtherPlayer));
+	NearLeft->SetInteractionRange(5.f);
+	TestNull(TEXT("The culling distance does not extend the point's interaction range"), Left->FindPointForInteraction().Point);
+	NearLeft->SetInteractionRange(64.f);
+	Right->SetRelativeLocation(FVector(20., 0., 0.));
+	Manager->RefreshNearbyInteractionPoints();
+	const int32 Copies = Manager->GetNearbyInteractionPoints().FilterByPredicate(
+		[NearLeft](const TWeakInterfacePtr<IInteractablePoint>& Entry) { return Entry.Get() == Cast<IInteractablePoint>(NearLeft); }).Num();
+	TestEqual(TEXT("A point near both hands is cached only once"), Copies, 1);
+
+	FHandSelectionWorld OtherWorld;
+	UInteractionPoint* Foreign = OtherWorld.AddPoint(OtherWorld.AddActor(), 1.f, InteractablePointType::Hand);
+	OtherWorld.BeginPlay();
+	Manager->RefreshNearbyInteractionPoints();
+	TestFalse(TEXT("World scans do not include points from another world"), Contains(Manager, Foreign));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteractionCacheRefreshTest, "VRShooter.Interaction.Cache.Refresh",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FInteractionCacheRefreshTest::RunTest(const FString& Parameters)
+{
+	FHandSelectionWorld Scene;
+	AActor* Player = Scene.AddActor();
+	UHandSlot* Hand = Scene.AddHand(Player);
+	UGrabManager* Manager = Player->FindComponentByClass<UGrabManager>();
+	Manager->SetInteractionDetectionCullingDistance(100.f);
+	Manager->SetInteractionDetectionRefreshInterval(1.f);
+	AActor* Item = Scene.AddActor();
+	UInteractionPoint* Known = Scene.AddPoint(Item, 10.f, InteractablePointType::Hand);
+	UInteractionPoint* Incoming = Scene.AddPoint(Item, 500.f, InteractablePointType::Hand);
+	Scene.BeginPlay();
+	Known->SetRelativeLocation(FVector(80., 0., 0.));
+	Incoming->SetRelativeLocation(FVector(20., 0., 0.));
+	TestNull(TEXT("Cached points use live positions; incoming points wait for refresh"), Hand->FindPointForInteraction().Point);
+	Manager->TickComponent(0.5f, LEVELTICK_All, nullptr);
+	TestNull(TEXT("Half an interval does not rebuild the cache"), Hand->FindPointForInteraction().Point);
+	UInteractionPoint* Spawned = Scene.AddPoint(Item, 5.f, InteractablePointType::Hand);
+	Manager->TickComponent(0.49f, LEVELTICK_All, nullptr);
+	TestNull(TEXT("Hand queries do not perform their own world scans"), Hand->FindPointForInteraction().Point);
+	Manager->TickComponent(0.02f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("The interval refresh discovers newly spawned and incoming points"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Spawned));
+	Spawned->DestroyComponent();
+	TestTrue(TEXT("Destroyed cached components are skipped without waiting for refresh"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Incoming));
+	Incoming->SetInteractionRange(0.f);
+	Known->SetRelativeLocation(FVector(30., 0., 0.));
+	TestTrue(TEXT("Range and position changes apply between cache refreshes"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Known));
+	Known->UnregisterComponent();
+	TestNull(TEXT("Unregistered cached points are excluded immediately"), Hand->FindPointForInteraction().Point);
+	Known->RegisterComponent();
+	TestTrue(TEXT("A cached point can be registered again without a world scan"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Known));
+	UInteractionPoint* Immediate = Scene.AddPoint(Item, 1.f, InteractablePointType::Hand);
+	Manager->SetInteractionDetectionRefreshInterval(0.f);
+	Manager->TickComponent(0.f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Zero interval refreshes on every manager tick"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Immediate));
+	Manager->SetInteractionDetectionCullingDistance(0.f);
+	Manager->RefreshNearbyInteractionPoints();
+	TestTrue(TEXT("Zero culling distance clears the candidate cache"), Manager->GetNearbyInteractionPoints().IsEmpty());
+	TestNull(TEXT("An empty manager cache yields no selection"), Hand->FindPointForInteraction().Point);
+	Manager->SetInteractionDetectionCullingDistance(100.f);
+	Manager->RefreshNearbyInteractionPoints();
+	Manager->DestroyComponent();
+	TestNull(TEXT("Destroying the manager safely disconnects hand selection"), Hand->FindPointForInteraction().Point);
 	return true;
 }
 

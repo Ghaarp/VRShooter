@@ -23,4 +23,5 @@ class VRSHOOTER_API IInteractionMaster
 public:
 	
 	virtual USkeletalMeshComponent* GetFullBodyMesh() const PURE_VIRTUAL(IInteractionMaster, return nullptr;);
+	virtual float GetScaleRatio() const PURE_VIRTUAL(IInteractionMaster::GetScaleRatio, return 1.f;);
 };
