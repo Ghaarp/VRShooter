@@ -6,9 +6,11 @@
 #include "Components/SceneComponent.h"
 #include "InteractiveSystem/Interface/InteractableMasterPoint.h"
 #include "InteractiveSystem/Interface/InteractableSlavePoint.h"
+#include "UObject/WeakInterfacePtr.h"
 #include "ItemSlot.generated.h"
 
 class UInteractionPoint;
+class UPrimitiveComponent;
 
 UCLASS( Abstract, ClassGroup=(Custom))
 class VRSHOOTER_API UItemSlot : public USceneComponent, public IInteractableMasterPoint
@@ -23,15 +25,18 @@ public:
 	void SetRequestedInteractionPoint(const TScriptInterface<IInteractableSlavePoint>& InPoint);
 	void RequestInteraction(UInteractionPoint* Point);
 	void ForceRelease();
+	uint32 GetRequestRevision() const { return RequestRevision; }
+	UInteractionPoint* FindCompatiblePoint(AActor* Actor) const;
 	IInteractableSlavePoint* GetAttachedInteractionPoint() const { return AttachedInteractionPoint.GetInterface(); }
 
 	// Point configuration
 	void SetPointType(InteractablePointType InPointType) { PointType = InPointType; }
 	void SetPointHand(InteractablePointHand InPointHand) { PointHand = InPointHand; }
 	void SetInteractionRange(float InRange) { InteractionRange = FMath::Max(InRange, 0.f); }
+	void SetSocketName(FName InSocketName) { SocketName = InSocketName; }
 	
 	// IInteractableMasterPoint implementation
-	virtual bool IsAvailableForInteraction() const override { return !IsValid(RequestedInteractionPoint.GetObject()); }
+	virtual bool IsAvailableForInteraction() const override { return !IsValid(RequestedInteractionPoint.GetObject()) && !WeldedRoot.IsValid(); }
 	virtual FVector GetPointLocation() const override { return GetComponentLocation(); }
 	virtual FTransform GetPointTransform() const override { return GetComponentTransform(); }
 	virtual float GetInteractionRange() const override { return InteractionRange; }
@@ -40,7 +45,10 @@ public:
 	virtual AActor* GetPointOwner() const override { return GetOwner(); }
 	virtual InteractablePointType GetInteractablePointType() {return PointType; };
 	virtual InteractablePointHand GetInteractablePointHand() {return PointHand; };
-	virtual bool Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave = false) override { return false; }
+	virtual bool UsesPhysicsAttachment() const override { return false; }
+	virtual bool Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave = false) override;
+	virtual void Unweld(IInteractableSlavePoint* SlavePoint) override;
+	virtual bool IsWeldedTo(const IInteractableSlavePoint* SlavePoint) const override;
 	
 protected:
 	// Component lifecycle
@@ -49,9 +57,20 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	FName GetSocketName() const { return SocketName; }
+	IInteractableSlavePoint* GetWeldedPoint() const { return WeldedPoint.Get(); }
+	USceneComponent* GetWeldedRoot() const { return WeldedRoot.Get(); }
+
+	// Shared Weld lifecycle owns validation and binding state; subclasses supply the mechanism.
+	virtual bool CreateWeld(IInteractableSlavePoint* SlavePoint, USceneComponent* Root, bool bTeleportToSlave);
+	virtual void DestroyWeld();
+	virtual bool IsWeldValid() const;
+
+	void ReleaseToInventory(UItemSlot* Target, UInteractionPoint* SourcePoint, uint32 SourceAttachmentId,
+		uint32 ExpectedRevision, uint32 TargetRevision);
 
 private:
 	friend class UInteractionPoint;
+	friend class AInteractableActor;
 
 	// Local attachment bookkeeping; updated by UInteractionPoint.
 	void SetAttachedPoint(UInteractionPoint* Point);
@@ -59,6 +78,10 @@ private:
 
 	UPROPERTY(Transient)
 	TScriptInterface<IInteractableSlavePoint> AttachedInteractionPoint;
+
+	TWeakInterfacePtr<IInteractableSlavePoint> WeldedPoint;
+	TWeakObjectPtr<USceneComponent> WeldedRoot;
+	TArray<TWeakObjectPtr<UPrimitiveComponent>> SuspendedBodies;
 
 	// Point configuration
 	// Maximum world-space distance from the hand; zero disables this point.

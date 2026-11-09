@@ -3,3 +3,8 @@
 
 #include "InteractiveSystem/Player/Component/InventorySlot.h"
 
+UInventorySlot::UInventorySlot()
+{
+	SetPointType(InteractablePointType::Outer);
+}
+

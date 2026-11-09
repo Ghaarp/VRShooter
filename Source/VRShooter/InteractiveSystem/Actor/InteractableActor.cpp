@@ -7,6 +7,7 @@
 #include "InteractiveSystem/Player/Component/ItemSlot.h"
 #include "InteractiveSystem/Interface/InteractableMasterPoint.h"
 #include "InteractiveSystem/Interface/InteractableSlavePoint.h"
+#include "Net/UnrealNetwork.h"
 
 FAttachmentSession::FAttachmentSession(IInteractableSlavePoint* InSlavePoint, IInteractableMasterPoint* InMasterPoint, const FTransform& ActorTransform)
 	: bIsAttaching(true)
@@ -33,7 +34,16 @@ AInteractableActor::AInteractableActor()
 void AInteractableActor::BeginPlay()
 {
 	Super::BeginPlay();
-	
+	// InteractionState owns attachment and local physics; a second root attachment
+	// replication path could detach a newer binding when properties arrive out of order.
+	if (GetRootComponent())
+		GetRootComponent()->SetIsReplicated(false);
+}
+
+void AInteractableActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	RESET_REPLIFETIME_CONDITION(AInteractableActor, AttachmentReplication, COND_Never);
 }
 
 void AInteractableActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -188,9 +198,14 @@ void AInteractableActor::CompleteAttachment(bool bTeleportMasterToSlave)
 	if (bWelded)
 	{
 		CastChecked<UInteractionPoint>(SlavePoint->_getUObject())->SetConnection(MasterPoint);
-		for (const TWeakObjectPtr<UPrimitiveComponent>& Primitive : AttachmentSession.SimulatedComponents)
-			if (Primitive.IsValid() && !Primitive->IsSimulatingPhysics())
-				Primitive->SetSimulatePhysics(true);
+		if (MasterPoint->UsesPhysicsAttachment())
+		{
+			for (const TWeakObjectPtr<UPrimitiveComponent>& Primitive : AttachmentSession.SimulatedComponents)
+				if (Primitive.IsValid() && !Primitive->IsSimulatingPhysics())
+					Primitive->SetSimulatePhysics(true);
+		}
+		else if (UItemSlot* Slot = Cast<UItemSlot>(MasterPoint->_getUObject()))
+			Slot->SuspendedBodies.Append(AttachmentSession.SimulatedComponents);
 		SetGravityEnabled(false);
 	}
 	ResetAttachment(!bWelded);

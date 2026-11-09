@@ -10,6 +10,7 @@
 class UPhysicsConstraintComponent;
 class UPrimitiveComponent;
 class UGrabManager;
+class UInventorySlot;
 
 USTRUCT()
 struct FInteractionPointResult
@@ -33,13 +34,14 @@ public:
 	void SetPhysicalHand(UPrimitiveComponent* InPhysicalHand);
 	void SetGrabManager(UGrabManager* InGrabManager);
 	UGrabManager* GetGrabManager() const { return GrabManager.Get(); }
-	virtual bool Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave = false) override;
-	virtual void Unweld(IInteractableSlavePoint* SlavePoint) override;
-	virtual bool IsWeldedTo(const IInteractableSlavePoint* SlavePoint) const override;
-	virtual bool IsAvailableForInteraction() const override;
+	virtual bool UsesPhysicsAttachment() const override { return true; }
 	FInteractionPointResult FindPointForInteraction();
 	void Grab();
 	void Release();
+
+	UFUNCTION(Server, Reliable)
+	void ServerReleaseToInventory(UInventorySlot* Target, UInteractionPoint* SourcePoint, uint32 SourceAttachmentId,
+		uint32 ExpectedRevision, uint32 TargetRevision);
 	bool IsHandFree() const { return IsAvailableForInteraction(); }
 	
 	bool GetInteractionRay(FVector& Start, FVector& End);
@@ -48,10 +50,15 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual bool CreateWeld(IInteractableSlavePoint* SlavePoint, USceneComponent* Root, bool bTeleportToSlave) override;
+	virtual void DestroyWeld() override;
+	virtual bool IsWeldValid() const override;
 
 private:
 	bool CanInteractWith(IInteractablePoint* Point);
 	bool IsHeldByOtherHand(const IInteractableSlavePoint* Point) const;
+	UPrimitiveComponent* GetWeldedBody() const;
+	void ReleaseConstraint();
 
 	UPROPERTY()
 	TObjectPtr<UPrimitiveComponent> PhysicalHand;
@@ -59,8 +66,6 @@ private:
 	UPROPERTY()
 	TObjectPtr<UPhysicsConstraintComponent> WeldConstraint;
 
-	TWeakInterfacePtr<IInteractableSlavePoint> WeldedPoint;
-	TWeakObjectPtr<UPrimitiveComponent> WeldedBody;
 	TWeakObjectPtr<UGrabManager> GrabManager;
 	// Updated by TickComponent; Grab consumes the last selection without another query.
 	FInteractionPointResult CachedInteractionResult;

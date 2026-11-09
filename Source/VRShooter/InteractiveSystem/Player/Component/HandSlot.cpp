@@ -11,6 +11,7 @@
 #include "Player/VRPlayer.h"
 #include "GameFramework/Actor.h"
 #include "InteractiveSystem/Player/Component/GrabManager.h"
+#include "InteractiveSystem/Player/Component/InventorySlot.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "PhysicsEngine/BodyInstance.h"
 
@@ -23,8 +24,6 @@ UHandSlot::UHandSlot()
 void UHandSlot::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	if (WeldedBody.IsValid() && !IsWeldedTo(WeldedPoint.Get()))
-		Unweld(WeldedPoint.Get());
 	
 	CachedInteractionResult = FindPointForInteraction();
 }
@@ -45,46 +44,52 @@ void UHandSlot::Grab()
 
 void UHandSlot::Release()
 {
+	UInteractionPoint* Source = Cast<UInteractionPoint>(GetRequestedInteractionPoint() ? GetRequestedInteractionPoint()->_getUObject() : nullptr);
+	UInventorySlot* Target = Cast<UInventorySlot>(CachedInteractionResult.Point.GetObject());
+	if (Source
+		&& Target
+		&& Source->GetAttachmentState().MasterPoint == this
+		&& CanUseInteractionPoint(Target))
+	{
+		ServerReleaseToInventory(Target, Source, Source->GetAttachmentState().AttachmentId,
+			GetRequestRevision(), Target->GetRequestRevision());
+		return;
+	}
 	RequestInteraction(nullptr);
 }
 
-bool UHandSlot::IsAvailableForInteraction() const
+void UHandSlot::ServerReleaseToInventory_Implementation(UInventorySlot* Target, UInteractionPoint* SourcePoint,
+	uint32 SourceAttachmentId, uint32 ExpectedRevision, uint32 TargetRevision)
 {
-	return Super::IsAvailableForInteraction() && !WeldedBody.IsValid();
+	ReleaseToInventory(Target, SourcePoint, SourceAttachmentId, ExpectedRevision, TargetRevision);
 }
 
-bool UHandSlot::IsWeldedTo(const IInteractableSlavePoint* SlavePoint) const
+UPrimitiveComponent* UHandSlot::GetWeldedBody() const
 {
-	return SlavePoint 
-		&& WeldedPoint.Get() == SlavePoint 
-		&& WeldedBody.IsValid() 
-		&& WeldedBody->IsSimulatingPhysics() 
+	return Cast<UPrimitiveComponent>(GetWeldedRoot());
+}
+
+bool UHandSlot::IsWeldValid() const
+{
+	const UPrimitiveComponent* Body = GetWeldedBody();
+	return Body
+		&& Body->IsSimulatingPhysics()
 		&& IsValid(PhysicalHand) 
 		&& PhysicalHand->IsSimulatingPhysics() 
 		&& IsValid(WeldConstraint) 
 		&& WeldConstraint->ConstraintInstance.IsValidConstraintInstance();
 }
 
-bool UHandSlot::Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave)
+bool UHandSlot::CreateWeld(IInteractableSlavePoint* SlavePoint, USceneComponent* Root, bool bTeleportToSlave)
 {
-	if (!SlavePoint || !IsValid(SlavePoint->_getUObject()))
-		return false;
-	
-	if (IsWeldedTo(SlavePoint))
-		return true;
-	
-	if (WeldedBody.IsValid() 
-		|| !IsValid(PhysicalHand) 
+	if (!IsValid(PhysicalHand)
 		|| !PhysicalHand->IsSimulatingPhysics() 
 		|| !IsValid(WeldConstraint) 
-		|| !IsValid(SlavePoint->GetPointOwner()) 
-		|| SlavePoint->GetPointOwner() == GetOwner() 
 		|| (GetRequestedInteractionPoint() && GetRequestedInteractionPoint() != SlavePoint))
 		return false;
 
-	UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(SlavePoint->GetPointOwner()->GetRootComponent());
-	if (!IsValid(Body) || Body->Mobility != EComponentMobility::Movable ||
-		!Body->GetBodyInstance() || !Body->GetBodyInstance()->IsValidBodyInstance())
+	UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(Root);
+	if (!Body || !Body->GetBodyInstance() || !Body->GetBodyInstance()->IsValidBodyInstance())
 		return false;
 
 	const FTransform InitialHandTransform = PhysicalHand->GetComponentTransform();
@@ -108,9 +113,7 @@ bool UHandSlot::Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave)
 	WeldConstraint->SetConstrainedComponents(PhysicalHand, NAME_None, Body, NAME_None);
 	if (!Body->IsSimulatingPhysics() || !WeldConstraint->ConstraintInstance.IsValidConstraintInstance())
 	{
-		WeldConstraint->BreakConstraint();
-		WeldConstraint->ComponentName2.ComponentName = NAME_None;
-		WeldConstraint->OverrideComponent2.Reset();
+		ReleaseConstraint();
 		Body->SetSimulatePhysics(bWasSimulating);
 		Body->SetEnableGravity(bHadGravity);
 		if (bTeleportToSlave)
@@ -118,17 +121,20 @@ bool UHandSlot::Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave)
 		return false;
 	}
 
-	WeldedPoint = SlavePoint;
-	WeldedBody = Body;
 	Body->WakeAllRigidBodies();
 	PhysicalHand->WakeAllRigidBodies();
 	return true;
 }
 
-void UHandSlot::Unweld(IInteractableSlavePoint* SlavePoint)
+void UHandSlot::DestroyWeld()
 {
-	if (WeldedPoint.Get() != SlavePoint)
-		return;
+	ReleaseConstraint();
+	if (UPrimitiveComponent* Body = GetWeldedBody())
+		Body->SetEnableGravity(true);
+}
+
+void UHandSlot::ReleaseConstraint()
+{
 	if (IsValid(WeldConstraint))
 	{
 		WeldConstraint->BreakConstraint();
@@ -136,10 +142,6 @@ void UHandSlot::Unweld(IInteractableSlavePoint* SlavePoint)
 		WeldConstraint->ComponentName2.ComponentName = NAME_None;
 		WeldConstraint->OverrideComponent2.Reset();
 	}
-	if (WeldedBody.IsValid())
-		WeldedBody->SetEnableGravity(true);
-	WeldedPoint.Reset();
-	WeldedBody.Reset();
 }
 
 bool UHandSlot::CanUseInteractionPoint(IInteractablePoint* Point)
@@ -248,29 +250,21 @@ bool UHandSlot::CanInteractWith(IInteractablePoint* Point)
 			SlavePoint->SupportsHand(GetInteractablePointHand()) && !IsHeldByOtherHand(SlavePoint);
 	}
 
-	IInteractableMasterPoint* Slot = Cast<IInteractableMasterPoint>(Point->_getUObject());
-	if (!Slot || Slot->GetInteractablePointType() == InteractablePointType::None || !Slot->IsAvailableForInteraction())
+	UInventorySlot* Slot = Cast<UInventorySlot>(Point->_getUObject());
+	if (!Slot
+		|| Slot->GetOwner() != GetOwner()
+		|| Slot->GetInteractablePointType() != InteractablePointType::Outer
+		|| !Slot->IsAvailableForInteraction())
 		return false;
 
-	IInteractableSlavePoint* HeldPoint = WeldedPoint.Get();
+	IInteractableSlavePoint* HeldPoint = GetWeldedPoint();
 	if (!HeldPoint)
 		HeldPoint = GetRequestedInteractionPoint();
 	AActor* HeldOwner = HeldPoint ? HeldPoint->GetPointOwner() : nullptr;
 	if (!IsValid(HeldOwner) || Slot->GetPointOwner() == HeldOwner)
 		return false;
 
-	// An item can have different slave points for hand grips and inventory slots.
-	TInlineComponentArray<UActorComponent*> ItemPoints(HeldOwner);
-	for (UActorComponent* ItemPoint : ItemPoints)
-	{
-		IInteractableSlavePoint* SlavePoint = Cast<IInteractableSlavePoint>(ItemPoint);
-		if (IsValid(ItemPoint) && SlavePoint &&
-			SlavePoint->GetInteractablePointType() == Slot->GetInteractablePointType() &&
-			(Slot->GetInteractablePointType() != InteractablePointType::Hand ||
-				SlavePoint->SupportsHand(Slot->GetInteractablePointHand())))
-			return true;
-	}
-	return false;
+	return Slot->FindCompatiblePoint(HeldOwner) != nullptr;
 }
 
 bool UHandSlot::IsHeldByOtherHand(const IInteractableSlavePoint* Point) const
@@ -305,7 +299,7 @@ void UHandSlot::SetPhysicalHand(UPrimitiveComponent* InPhysicalHand)
 {
 	if (PhysicalHand != InPhysicalHand)
 	{
-		Unweld(WeldedPoint.Get());
+		Unweld(GetWeldedPoint());
 		CachedInteractionResult = FInteractionPointResult();
 	}
 	PhysicalHand = InPhysicalHand;
@@ -345,12 +339,11 @@ void UHandSlot::BeginPlay()
 void UHandSlot::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	SetGrabManager(nullptr);
-	Unweld(WeldedPoint.Get());
+	Super::EndPlay(EndPlayReason);
 	if (IsValid(WeldConstraint))
 	{
 		WeldConstraint->DestroyComponent();
 	}
 	WeldConstraint = nullptr;
 
-	Super::EndPlay(EndPlayReason);
 }

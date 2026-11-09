@@ -6,12 +6,13 @@
 #include "AttachmentTestTypes.generated.h"
 
 UCLASS(Transient, NotBlueprintable)
-class UAttachmentTestSlot : public UInventorySlot
+class UAttachmentTestSlot : public UItemSlot
 {
 	GENERATED_BODY()
 
 public:
 	virtual float GetAttachmentScaleRatio() const override { return ScaleRatio; }
+	virtual bool UsesPhysicsAttachment() const override { return true; }
 	virtual bool Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave = false) override
 	{
 		++WeldCount;

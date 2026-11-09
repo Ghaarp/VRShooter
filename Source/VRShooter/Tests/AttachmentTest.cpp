@@ -481,7 +481,10 @@ bool FInteractionFailureTest::RunTest(const FString& Parameters)
 	FAttachmentWorld Scene;
 	UInventorySlot* FailingSlot = NewObject<UInventorySlot>(Scene.Player);
 	Scene.Player->AddInstanceComponent(FailingSlot);
+	FailingSlot->SetSocketName(TEXT("MissingSocket"));
 	FailingSlot->RegisterComponent();
+	Scene.Point->SetPointType(InteractablePointType::Outer);
+	Scene.Slot->SetPointType(InteractablePointType::Outer);
 	Scene.Item->DispatchBeginPlay(); Scene.Player->DispatchBeginPlay();
 	TScriptInterface<IInteractableSlavePoint> Point(Scene.Point);
 	FailingSlot->SetRequestedInteractionPoint(Point);

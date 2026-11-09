@@ -15,5 +15,6 @@ class VRSHOOTER_API UInventorySlot : public UItemSlot
 	GENERATED_BODY()
 
 public:
+	UInventorySlot();
 	virtual bool IsInventorySlot() const override { return true; }
 };

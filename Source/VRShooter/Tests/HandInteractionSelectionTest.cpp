@@ -189,6 +189,7 @@ bool FOccupiedHandSelectionTest::RunTest(const FString& Parameters)
 	Scene.AddSlot(Player, 2.f, InteractablePointType::Inner);
 	Scene.AddSlot(Player, 1.f, InteractablePointType::None);
 	Scene.AddSlot(Player, 65.f, InteractablePointType::Outer);
+	Scene.AddSlot(Scene.AddActor(), 1.f, InteractablePointType::Outer);
 	AActor* HeldItem = Scene.AddActor();
 	UInteractionPoint* Grip = Scene.AddPoint(HeldItem, 500.f, InteractablePointType::Hand);
 	UInteractionPoint* Mount = Scene.AddPoint(HeldItem, 500.f, InteractablePointType::Outer);
@@ -205,8 +206,8 @@ bool FOccupiedHandSelectionTest::RunTest(const FString& Parameters)
 
 	OtherHand->SetRelativeLocation(FVector(5., 0., 0.));
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("An empty hand can be selected as a master point"), Result.Point.Get() == Cast<IInteractablePoint>(OtherHand));
-	TestFalse(TEXT("A hand slot is not an inventory slot"), Result.bIsInventorySlot);
+	TestTrue(TEXT("An empty hand and another player's inventory are excluded"), Result.Point.Get() == Cast<IInteractablePoint>(NearSlot));
+	TestTrue(TEXT("Only own inventory remains selectable"), Result.bIsInventorySlot);
 	SetSelectionOccupancy(OtherHand, TScriptInterface<IInteractableSlavePoint>(Grip));
 	Result = Hand->FindPointForInteraction();
 	TestTrue(TEXT("An occupied hand is rejected as a target"), Result.Point.Get() == Cast<IInteractablePoint>(NearSlot));
