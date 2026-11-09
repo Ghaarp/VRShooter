@@ -29,7 +29,8 @@ public:
 	
 	virtual InteractablePointType GetInteractablePointType() PURE_VIRTUAL(IInteractableMasterPoint::GetInteractablePointType, return InteractablePointType::None; );
 	virtual InteractablePointHand GetInteractablePointHand() PURE_VIRTUAL(IInteractableMasterPoint::GetInteractablePointHand, return InteractablePointHand::None; );
-	virtual bool Weld(IInteractableSlavePoint* SlavePoint) PURE_VIRTUAL(IInteractableMasterPoint::Weld, return false; );
+	// Teleport the master grip to the slave before locking an additional binding.
+	virtual bool Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave = false) PURE_VIRTUAL(IInteractableMasterPoint::Weld, return false; );
 	virtual void Unweld(IInteractableSlavePoint* SlavePoint) {}
 	virtual bool IsWeldedTo(const IInteractableSlavePoint* SlavePoint) const { return false; }
 

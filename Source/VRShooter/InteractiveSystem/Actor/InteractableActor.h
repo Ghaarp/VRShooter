@@ -52,16 +52,24 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	virtual InteractionActorType GetInteractionActorType() const override { return ActorType; }
-	virtual void Attach(IInteractableSlavePoint* SlavePoint, IInteractableMasterPoint* MasterPoint) override;
+	virtual IInteractableSlavePoint* GetMainPoint() override;
+	bool IsFreeForInteraction() const;
+	virtual void Attach(IInteractableSlavePoint* SlavePoint, IInteractableMasterPoint* MasterPoint, bool bIsInstant = false) override;
 	virtual void Detach(IInteractableSlavePoint* SlavePoint) override;
 	virtual void DetachAll() override;
 	bool IsAttaching() const { return AttachmentSession.bIsAttaching; }
-	bool IsAttached() const { return bIsAttached; }
+	bool IsAttached() const;
+	void CallDetach();
+	uint32 NextOwnershipId() { return ++OwnershipSerial; }
+	bool AcceptOwnership(uint32 Id);
+	float GetAttachmentTime() const { return AttachmentTime; }
 
 protected:
 	void AttachmentTick(float DeltaTime);
 
 private:
+	void UpdateAttachmentTransform(float Alpha);
+	void CompleteAttachment(bool bTeleportMasterToSlave = false);
 	void ResetAttachment(bool bRestorePhysics);
 	void SetGravityEnabled(bool bEnabled);
 
@@ -71,9 +79,7 @@ private:
 	UPROPERTY(Transient, VisibleInstanceOnly, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
 	FAttachmentSession AttachmentSession;
 
-	// The completed physical binding outlives the interpolation session.
-	bool bIsAttached = false;
-	TWeakInterfacePtr<IInteractableSlavePoint> AttachedSlavePoint;
-	TWeakInterfacePtr<IInteractableMasterPoint> AttachedMasterPoint;
-
+	uint64 AttachmentSerial = 0;
+	uint32 OwnershipSerial = 0;
+	uint32 AppliedOwnershipId = 0;
 };

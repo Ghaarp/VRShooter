@@ -17,7 +17,7 @@ struct FInteractionPointResult
 	GENERATED_BODY()
 
 public:
-	IInteractablePoint* Point = nullptr;
+	TWeakInterfacePtr<IInteractablePoint> Point;
 	bool bIsInventorySlot = false;
 };
 
@@ -33,14 +33,16 @@ public:
 	void SetPhysicalHand(UPrimitiveComponent* InPhysicalHand);
 	void SetGrabManager(UGrabManager* InGrabManager);
 	UGrabManager* GetGrabManager() const { return GrabManager.Get(); }
-	virtual bool Weld(IInteractableSlavePoint* SlavePoint) override;
+	virtual bool Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave = false) override;
 	virtual void Unweld(IInteractableSlavePoint* SlavePoint) override;
 	virtual bool IsWeldedTo(const IInteractableSlavePoint* SlavePoint) const override;
 	virtual bool IsAvailableForInteraction() const override;
-
-	bool IsHandFree() const { return IsAvailableForInteraction(); }
-
 	FInteractionPointResult FindPointForInteraction();
+	void Grab();
+	void Release();
+	bool IsHandFree() const { return IsAvailableForInteraction(); }
+	
+	bool GetInteractionRay(FVector& Start, FVector& End);
 	bool CanUseInteractionPoint(IInteractablePoint* Point);
 
 protected:
@@ -60,4 +62,10 @@ private:
 	TWeakInterfacePtr<IInteractableSlavePoint> WeldedPoint;
 	TWeakObjectPtr<UPrimitiveComponent> WeldedBody;
 	TWeakObjectPtr<UGrabManager> GrabManager;
+	// Updated by TickComponent; Grab consumes the last selection without another query.
+	FInteractionPointResult CachedInteractionResult;
+	
+	
+	FInteractionPointResult FindPointByRange();
+	FInteractionPointResult FindPointByRaycast();
 };

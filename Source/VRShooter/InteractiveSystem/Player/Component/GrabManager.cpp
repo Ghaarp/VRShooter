@@ -8,6 +8,7 @@
 #include "InteractiveSystem/Interface/InteractableMasterPoint.h"
 #include "InteractiveSystem/Player/Component/HandSlot.h"
 #include "InteractiveSystem/Component/InteractionPoint.h"
+#include "InteractiveSystem/Actor/InteractableActor.h"
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
 
@@ -161,8 +162,16 @@ void UGrabManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void UGrabManager::Grab(InteractablePointHand Hand)
 {
+	for (const auto& Entry : HandSlots)
+		if (UHandSlot* Slot = Cast<UHandSlot>(Entry.GetObject()))
+			if (Slot->GetInteractablePointHand() == Hand)
+				Slot->Grab();
 }
 
 void UGrabManager::Release(InteractablePointHand Hand)
 {
+	for (const auto& Entry : HandSlots)
+		if (UHandSlot* Slot = Cast<UHandSlot>(Entry.GetObject()))
+			if (Slot->GetInteractablePointHand() == Hand)
+				Slot->Release();
 }

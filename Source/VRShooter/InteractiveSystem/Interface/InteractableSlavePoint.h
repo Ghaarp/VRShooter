@@ -30,6 +30,6 @@ public:
 	virtual bool IsAvailable(IInteractableSlavePoint* ParentPoint) PURE_VIRTUAL(IInteractableSlavePoint::IsAvailable, return false; );
 	
 	virtual IInteractable* GetInteractableOwner() PURE_VIRTUAL(IInteractableSlavePoint::GetInteractableOwner, return nullptr; );
-	virtual void Attach(IInteractableMasterPoint* MasterPoint) PURE_VIRTUAL(IInteractableSlavePoint::Attach, );
+	virtual void Attach(IInteractableMasterPoint* MasterPoint, bool bIsInstant = false) PURE_VIRTUAL(IInteractableSlavePoint::Attach, );
 	virtual void Detach() PURE_VIRTUAL(IInteractableSlavePoint::Detach, );
 };

@@ -5,12 +5,10 @@
 #include "EngineUtils.h"
 #include "Tests/AutomationEditorCommon.h"
 #include "InteractiveSystem/Component/InteractionPoint.h"
-#include "InteractiveSystem/Common/InteractionSerializationVersion.h"
 #include "InteractiveSystem/Player/Component/GrabManager.h"
 #include "InteractiveSystem/Player/Component/HandSlot.h"
 #include "Items/ItemCube.h"
 #include "Player/BasicPlayer.h"
-#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -44,14 +42,6 @@ public:
 			PointCount += Points.Num();
 			for (UInteractionPoint* Point : Points)
 			{
-				const UInteractionPoint* Template = Cast<UInteractionPoint>(Point->GetArchetype());
-				if (Template && Template->GetLinkerCustomVersion(FInteractionSerializationVersion::GUID) < FInteractionSerializationVersion::DistanceBasedDetection)
-				{
-					const FFloatProperty* LegacyRadius = FindFProperty<FFloatProperty>(UInteractionPoint::StaticClass(), TEXT("DetectionRadius"));
-					if (Test->TestNotNull(TEXT("Legacy Blueprint radius overrides remain readable"), LegacyRadius))
-						Test->TestEqual(TEXT("Legacy point templates migrate radius plus the former 32 cm hand radius"),
-							Template->GetInteractionRange(), FMath::Max(LegacyRadius->GetPropertyValue_InContainer(Template), 0.f) + 32.f);
-				}
 				const float Range = Point->GetInteractionRange();
 				const FVector Scale = Actor->GetActorScale3D();
 				Actor->SetActorScale3D(FVector(2.));

@@ -21,6 +21,8 @@ public:
 };
 
 // This class does not need to be modified.
+class UCapsuleComponent;
+
 UINTERFACE(MinimalAPI)
 class ULocomotionCompatible : public UInterface
 {

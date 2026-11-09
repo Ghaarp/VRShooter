@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "InteractiveSystem/Player/Component/InventorySlot.h"
+#include "InteractiveSystem/Player/Component/HandSlot.h"
 #include "AttachmentTestTypes.generated.h"
 
 UCLASS(Transient, NotBlueprintable)
@@ -11,7 +12,7 @@ class UAttachmentTestSlot : public UInventorySlot
 
 public:
 	virtual float GetAttachmentScaleRatio() const override { return ScaleRatio; }
-	virtual bool Weld(IInteractableSlavePoint* SlavePoint) override
+	virtual bool Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave = false) override
 	{
 		++WeldCount;
 		if (OnWeld)
@@ -29,5 +30,24 @@ public:
 	IInteractableSlavePoint* WeldedPoint = nullptr;
 	float ScaleRatio = 1.f;
 	int32 WeldCount = 0;
+	TFunction<void()> OnWeld;
+};
+
+UCLASS(Transient, NotBlueprintable)
+class UAttachmentTestHand : public UHandSlot
+{
+	GENERATED_BODY()
+
+public:
+	virtual float GetAttachmentScaleRatio() const override { return ScaleRatio; }
+	virtual bool Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave = false) override
+	{
+		const bool bResult = Super::Weld(SlavePoint, bTeleportToSlave);
+		if (OnWeld)
+			OnWeld();
+		return bResult;
+	}
+
+	float ScaleRatio = 1.f;
 	TFunction<void()> OnWeld;
 };

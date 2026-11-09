@@ -29,7 +29,7 @@ public:
 	virtual InteractionActorType GetInteractionActorType() const PURE_VIRTUAL(IInteractable::GetInteractionActorType, return InteractionActorType::None; );
 	virtual IInteractableSlavePoint* FindPointByType(InteractablePointType Type) PURE_VIRTUAL(IInteractable::FindPointByType, return nullptr; );
 	virtual IInteractableSlavePoint* GetMainPoint() PURE_VIRTUAL(IInteractable::GetMainPoint, return nullptr; );
-	virtual void Attach(IInteractableSlavePoint* SlavePoint, IInteractableMasterPoint* MasterPoint) PURE_VIRTUAL(IInteractable::Attach, );
+	virtual void Attach(IInteractableSlavePoint* SlavePoint, IInteractableMasterPoint* MasterPoint, bool bIsInstant = false) PURE_VIRTUAL(IInteractable::Attach, );
 	virtual void Detach(IInteractableSlavePoint* SlavePoint) PURE_VIRTUAL(IInteractable::Detach, );
 	virtual void DetachAll() PURE_VIRTUAL(IInteractable::DetachAll, );
 	virtual IInteractable* GetMaster() PURE_VIRTUAL(IInteractable::GetMaster, return nullptr; );

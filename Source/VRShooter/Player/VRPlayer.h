@@ -85,6 +85,9 @@ public:
 	// Sets default values for this pawn's properties
 	AVRPlayer();
 
+	virtual void Tick(float DeltaTime) override;
+	FRotator GetHandRayAngleOffset(InteractablePointHand Hand) const;
+
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
@@ -118,6 +121,13 @@ protected:
 	// Properties ---------------------------------------
 	UPROPERTY(EditAnywhere, Category = "VRSettings")
 	FName VRViewSocketName = "VRViewPoint";
+
+	// Local rotation relative to the physical hand; zero points along its +X axis.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRSettings|Hand Rays")
+	FRotator LeftHandRayAngleOffset = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRSettings|Hand Rays")
+	FRotator RightHandRayAngleOffset = FRotator::ZeroRotator;
 
 	// Components ---------------------------------------
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))

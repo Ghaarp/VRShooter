@@ -1,7 +1,11 @@
 #if WITH_EDITOR && WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "UObject/UnrealType.h"
 #include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Items/ItemCube.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -13,6 +17,15 @@
 
 namespace
 {
+// Selection tests inject a received occupancy snapshot without running attachment
+// admission or physics. The network-state tests exercise the authoritative setter.
+void SetSelectionOccupancy(UItemSlot* Slot, const TScriptInterface<IInteractableSlavePoint>& Point)
+{
+	FInterfaceProperty* Property = FindFProperty<FInterfaceProperty>(UItemSlot::StaticClass(), TEXT("RequestedInteractionPoint"));
+	check(Property);
+	*Property->ContainerPtrToValuePtr<TScriptInterface<IInteractableSlavePoint>>(Slot) = Point;
+}
+
 struct FHandSelectionWorld
 {
 	UWorld* World;
@@ -130,29 +143,32 @@ bool FFreeHandSelectionTest::RunTest(const FString& Parameters)
 	FInteractionPointResult Result = Hand->FindPointForInteraction();
 
 	// The default point range preserves the previous 32 + 32 cm reach.
-	TestTrue(TEXT("The nearest compatible slave point is selected"), Result.Point == Cast<IInteractablePoint>(Near));
+	TestTrue(TEXT("The nearest compatible slave point is selected"), Result.Point.Get() == Cast<IInteractablePoint>(Near));
 	TestFalse(TEXT("A slave point is not an inventory slot"), Result.bIsInventorySlot);
 	TestTrue(TEXT("Finding a candidate leaves the hand free"), Hand->IsHandFree());
 
 	Near->SetInteractionRange(50.f);
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("A point exactly at its range boundary is excluded"), Result.Point == Cast<IInteractablePoint>(Far));
+	TestTrue(TEXT("A point exactly at its range boundary is excluded"), Result.Point.Get() == Cast<IInteractablePoint>(Far));
 	Near->SetInteractionRange(64.f);
 
 	Near->SetRelativeLocation(FVector(1000., 0., 0.));
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("Moving the closest point away selects the next point"), Result.Point == Cast<IInteractablePoint>(Far));
+	TestTrue(TEXT("Moving the closest point away selects the next point"), Result.Point.Get() == Cast<IInteractablePoint>(Far));
 
 	Far->DestroyComponent();
 	Result = Hand->FindPointForInteraction();
-	TestNull(TEXT("Destroying the remaining point returns no candidate"), Result.Point);
+	TestNull(TEXT("Destroying the remaining point returns no candidate"), Result.Point.Get());
 
 	WrongHand->GetSockets()[0]->SetHand(InteractablePointHand::None);
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("An unrestricted socket supports either hand"), Result.Point == Cast<IInteractablePoint>(WrongHand));
+	TestNull(TEXT("A None socket does not match a Left hand"), Result.Point.Get());
+	WrongHand->GetSockets()[0]->SetHand(InteractablePointHand::Left);
+	Result = Hand->FindPointForInteraction();
+	TestTrue(TEXT("A matching socket supports the hand"), Result.Point.Get() == Cast<IInteractablePoint>(WrongHand));
 	WrongHand->SetInteractionRange(0.f);
 	Result = Hand->FindPointForInteraction();
-	TestNull(TEXT("A zero interaction range disables the point immediately"), Result.Point);
+	TestNull(TEXT("A zero interaction range disables the point immediately"), Result.Point.Get());
 	TestFalse(TEXT("An empty result is not an inventory slot"), Result.bIsInventorySlot);
 	return true;
 }
@@ -178,52 +194,52 @@ bool FOccupiedHandSelectionTest::RunTest(const FString& Parameters)
 	UInteractionPoint* Mount = Scene.AddPoint(HeldItem, 500.f, InteractablePointType::Outer);
 	UInteractionPoint* FreePoint = Scene.AddPoint(Scene.AddActor(), 10.f, InteractablePointType::Hand);
 	Scene.BeginPlay();
-	Hand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(Grip));
+	SetSelectionOccupancy(Hand, TScriptInterface<IInteractableSlavePoint>(Grip));
 	FInteractionPointResult Result = Hand->FindPointForInteraction();
 
 	TestFalse(TEXT("A desired slave point makes the hand occupied"), Hand->IsHandFree());
-	TestTrue(TEXT("A compatible slot on the same player actor can be selected"), Result.Point == Cast<IInteractablePoint>(NearSlot));
+	TestTrue(TEXT("A compatible slot on the same player actor can be selected"), Result.Point.Get() == Cast<IInteractablePoint>(NearSlot));
 	TestTrue(TEXT("An inventory slot is identified in the result"), Result.bIsInventorySlot);
 	TestTrue(TEXT("Selection preserves requested occupancy"), Hand->GetRequestedInteractionPoint() == Grip);
 	TestTrue(TEXT("Selection does not attach the item"), Grip->GetAttachParent() == HeldItem->GetRootComponent());
 
 	OtherHand->SetRelativeLocation(FVector(5., 0., 0.));
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("An empty hand can be selected as a master point"), Result.Point == Cast<IInteractablePoint>(OtherHand));
+	TestTrue(TEXT("An empty hand can be selected as a master point"), Result.Point.Get() == Cast<IInteractablePoint>(OtherHand));
 	TestFalse(TEXT("A hand slot is not an inventory slot"), Result.bIsInventorySlot);
-	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(Grip));
+	SetSelectionOccupancy(OtherHand, TScriptInterface<IInteractableSlavePoint>(Grip));
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("An occupied hand is rejected as a target"), Result.Point == Cast<IInteractablePoint>(NearSlot));
+	TestTrue(TEXT("An occupied hand is rejected as a target"), Result.Point.Get() == Cast<IInteractablePoint>(NearSlot));
 	OtherHand->SetRelativeLocation(FVector(1000., 0., 0.));
 
 	TestTrue(TEXT("Inventory slots replicate by default"), NearSlot->GetIsReplicated());
-	NearSlot->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(Mount));
+	SetSelectionOccupancy(NearSlot, TScriptInterface<IInteractableSlavePoint>(Mount));
 	TestFalse(TEXT("An occupied inventory slot is unavailable"), NearSlot->IsAvailableForInteraction());
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("An occupied inventory slot is rejected as a target"), Result.Point == Cast<IInteractablePoint>(FarSlot));
+	TestTrue(TEXT("An occupied inventory slot is rejected as a target"), Result.Point.Get() == Cast<IInteractablePoint>(FarSlot));
 	TestTrue(TEXT("Selection preserves inventory occupancy"), NearSlot->GetRequestedInteractionPoint() == Mount);
-	NearSlot->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>());
+	SetSelectionOccupancy(NearSlot, TScriptInterface<IInteractableSlavePoint>());
 	TestTrue(TEXT("Clearing inventory occupancy makes the slot available"), NearSlot->IsAvailableForInteraction());
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("A cleared inventory slot can be selected again"), Result.Point == Cast<IInteractablePoint>(NearSlot));
+	TestTrue(TEXT("A cleared inventory slot can be selected again"), Result.Point.Get() == Cast<IInteractablePoint>(NearSlot));
 
 	NearSlot->SetRelativeLocation(FVector(1000., 0., 0.));
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("Moving a slot away updates the nearest master point"), Result.Point == Cast<IInteractablePoint>(FarSlot));
+	TestTrue(TEXT("Moving a slot away updates the nearest master point"), Result.Point.Get() == Cast<IInteractablePoint>(FarSlot));
 	Mount->DestroyComponent();
 	Result = Hand->FindPointForInteraction();
-	TestNull(TEXT("Slots without a matching point on the held item are rejected"), Result.Point);
+	TestNull(TEXT("Slots without a matching point on the held item are rejected"), Result.Point.Get());
 	TestFalse(TEXT("An empty result clears the inventory flag"), Result.bIsInventorySlot);
 
-	Hand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>());
+	SetSelectionOccupancy(Hand, TScriptInterface<IInteractableSlavePoint>());
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("Clearing occupancy restores slave selection"), Result.Point == Cast<IInteractablePoint>(FreePoint));
+	TestTrue(TEXT("Clearing occupancy restores slave selection"), Result.Point.Get() == Cast<IInteractablePoint>(FreePoint));
 	TestFalse(TEXT("The inventory flag is recalculated after clearing occupancy"), Result.bIsInventorySlot);
-	Hand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(Grip));
+	SetSelectionOccupancy(Hand, TScriptInterface<IInteractableSlavePoint>(Grip));
 	HeldItem->Destroy();
 	Result = Hand->FindPointForInteraction();
 	TestTrue(TEXT("A destroyed desired point leaves the hand free"), Hand->IsHandFree());
-	TestTrue(TEXT("Selection recovers after the desired item is destroyed"), Result.Point == Cast<IInteractablePoint>(FreePoint));
+	TestTrue(TEXT("Selection recovers after the desired item is destroyed"), Result.Point.Get() == Cast<IInteractablePoint>(FreePoint));
 	return true;
 }
 
@@ -243,30 +259,30 @@ bool FSamePlayerHeldPointSelectionTest::RunTest(const FString& Parameters)
 	UInteractionPoint* OtherGrip = Scene.AddPoint(Item, 10.f, InteractablePointType::Hand);
 	UInventorySlot* Inventory = Scene.AddSlot(Player, 1.f, InteractablePointType::Outer);
 	Scene.BeginPlay();
-	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(Grip));
+	SetSelectionOccupancy(OtherHand, TScriptInterface<IInteractableSlavePoint>(Grip));
 
 	FInteractionPointResult Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("Another point on the same held item remains selectable"), Result.Point == Cast<IInteractablePoint>(OtherGrip));
+	TestTrue(TEXT("Another point on the same held item remains selectable"), Result.Point.Get() == Cast<IInteractablePoint>(OtherGrip));
 	TestFalse(TEXT("The other grip is not an inventory slot"), Result.bIsInventorySlot);
 	TestTrue(TEXT("Selection preserves the other hand's occupancy"), OtherHand->GetRequestedInteractionPoint() == Grip);
 	TestTrue(TEXT("Selection leaves the searching hand free"), Hand->IsHandFree());
 	Result = AnotherPlayerHand->FindPointForInteraction();
-	TestTrue(TEXT("A different player can select the exact held grip"), Result.Point == Cast<IInteractablePoint>(Grip));
+	TestTrue(TEXT("A different player can select the exact held grip"), Result.Point.Get() == Cast<IInteractablePoint>(Grip));
 
 	OtherGrip->SetRelativeLocation(FVector(1000., 0., 0.));
 	Result = Hand->FindPointForInteraction();
-	TestNull(TEXT("The exact grip held by the same player's other hand is excluded"), Result.Point);
-	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>());
+	TestNull(TEXT("The exact grip held by the same player's other hand is excluded"), Result.Point.Get());
+	SetSelectionOccupancy(OtherHand, TScriptInterface<IInteractableSlavePoint>());
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("Releasing the grip immediately makes it selectable"), Result.Point == Cast<IInteractablePoint>(Grip));
+	TestTrue(TEXT("Releasing the grip immediately makes it selectable"), Result.Point.Get() == Cast<IInteractablePoint>(Grip));
 
-	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(OtherGrip));
+	SetSelectionOccupancy(OtherHand, TScriptInterface<IInteractableSlavePoint>(OtherGrip));
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("Holding a different grip on the same item does not exclude the nearest grip"), Result.Point == Cast<IInteractablePoint>(Grip));
-	OtherHand->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>());
-	Inventory->SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(Grip));
+	TestTrue(TEXT("Holding a different grip on the same item does not exclude the nearest grip"), Result.Point.Get() == Cast<IInteractablePoint>(Grip));
+	SetSelectionOccupancy(OtherHand, TScriptInterface<IInteractableSlavePoint>());
+	SetSelectionOccupancy(Inventory, TScriptInterface<IInteractableSlavePoint>(Grip));
 	Result = Hand->FindPointForInteraction();
-	TestTrue(TEXT("An inventory slot does not count as the player's other hand"), Result.Point == Cast<IInteractablePoint>(Grip));
+	TestTrue(TEXT("An inventory slot does not count as the player's other hand"), Result.Point.Get() == Cast<IInteractablePoint>(Grip));
 	return true;
 }
 
@@ -303,11 +319,11 @@ bool FInteractionCacheRangeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Points beyond the culling distance are omitted"), Contains(Manager, Far));
 	TestFalse(TEXT("The first player does not use the second player's nearby points"), Contains(Manager, NearOtherPlayer));
 	TestTrue(TEXT("The second player has its own cache"), Contains(OtherManager, NearOtherPlayer) && !Contains(OtherManager, NearLeft));
-	TestTrue(TEXT("Left-hand selection uses its current distance"), Left->FindPointForInteraction().Point == Cast<IInteractablePoint>(NearLeft));
-	TestTrue(TEXT("Right-hand selection uses its current distance"), Right->FindPointForInteraction().Point == Cast<IInteractablePoint>(NearRight));
-	TestTrue(TEXT("The other player selects from its own cache"), OtherHand->FindPointForInteraction().Point == Cast<IInteractablePoint>(NearOtherPlayer));
+	TestTrue(TEXT("Left-hand selection uses its current distance"), Left->FindPointForInteraction().Point.Get() == Cast<IInteractablePoint>(NearLeft));
+	TestTrue(TEXT("Right-hand selection uses its current distance"), Right->FindPointForInteraction().Point.Get() == Cast<IInteractablePoint>(NearRight));
+	TestTrue(TEXT("The other player selects from its own cache"), OtherHand->FindPointForInteraction().Point.Get() == Cast<IInteractablePoint>(NearOtherPlayer));
 	NearLeft->SetInteractionRange(5.f);
-	TestNull(TEXT("The culling distance does not extend the point's interaction range"), Left->FindPointForInteraction().Point);
+	TestNull(TEXT("The culling distance does not extend the point's interaction range"), Left->FindPointForInteraction().Point.Get());
 	NearLeft->SetInteractionRange(64.f);
 	Right->SetRelativeLocation(FVector(20., 0., 0.));
 	Manager->RefreshNearbyInteractionPoints();
@@ -340,35 +356,153 @@ bool FInteractionCacheRefreshTest::RunTest(const FString& Parameters)
 	Scene.BeginPlay();
 	Known->SetRelativeLocation(FVector(80., 0., 0.));
 	Incoming->SetRelativeLocation(FVector(20., 0., 0.));
-	TestNull(TEXT("Cached points use live positions; incoming points wait for refresh"), Hand->FindPointForInteraction().Point);
+	TestNull(TEXT("Cached points use live positions; incoming points wait for refresh"), Hand->FindPointForInteraction().Point.Get());
 	Manager->TickComponent(0.5f, LEVELTICK_All, nullptr);
-	TestNull(TEXT("Half an interval does not rebuild the cache"), Hand->FindPointForInteraction().Point);
+	TestNull(TEXT("Half an interval does not rebuild the cache"), Hand->FindPointForInteraction().Point.Get());
 	UInteractionPoint* Spawned = Scene.AddPoint(Item, 5.f, InteractablePointType::Hand);
 	Manager->TickComponent(0.49f, LEVELTICK_All, nullptr);
-	TestNull(TEXT("Hand queries do not perform their own world scans"), Hand->FindPointForInteraction().Point);
+	TestNull(TEXT("Hand queries do not perform their own world scans"), Hand->FindPointForInteraction().Point.Get());
 	Manager->TickComponent(0.02f, LEVELTICK_All, nullptr);
-	TestTrue(TEXT("The interval refresh discovers newly spawned and incoming points"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Spawned));
+	TestTrue(TEXT("The interval refresh discovers newly spawned and incoming points"), Hand->FindPointForInteraction().Point.Get() == Cast<IInteractablePoint>(Spawned));
 	Spawned->DestroyComponent();
-	TestTrue(TEXT("Destroyed cached components are skipped without waiting for refresh"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Incoming));
+	TestTrue(TEXT("Destroyed cached components are skipped without waiting for refresh"), Hand->FindPointForInteraction().Point.Get() == Cast<IInteractablePoint>(Incoming));
 	Incoming->SetInteractionRange(0.f);
 	Known->SetRelativeLocation(FVector(30., 0., 0.));
-	TestTrue(TEXT("Range and position changes apply between cache refreshes"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Known));
+	TestTrue(TEXT("Range and position changes apply between cache refreshes"), Hand->FindPointForInteraction().Point.Get() == Cast<IInteractablePoint>(Known));
 	Known->UnregisterComponent();
-	TestNull(TEXT("Unregistered cached points are excluded immediately"), Hand->FindPointForInteraction().Point);
+	TestNull(TEXT("Unregistered cached points are excluded immediately"), Hand->FindPointForInteraction().Point.Get());
 	Known->RegisterComponent();
-	TestTrue(TEXT("A cached point can be registered again without a world scan"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Known));
+	TestTrue(TEXT("A cached point can be registered again without a world scan"), Hand->FindPointForInteraction().Point.Get() == Cast<IInteractablePoint>(Known));
 	UInteractionPoint* Immediate = Scene.AddPoint(Item, 1.f, InteractablePointType::Hand);
 	Manager->SetInteractionDetectionRefreshInterval(0.f);
 	Manager->TickComponent(0.f, LEVELTICK_All, nullptr);
-	TestTrue(TEXT("Zero interval refreshes on every manager tick"), Hand->FindPointForInteraction().Point == Cast<IInteractablePoint>(Immediate));
+	TestTrue(TEXT("Zero interval refreshes on every manager tick"), Hand->FindPointForInteraction().Point.Get() == Cast<IInteractablePoint>(Immediate));
 	Manager->SetInteractionDetectionCullingDistance(0.f);
 	Manager->RefreshNearbyInteractionPoints();
 	TestTrue(TEXT("Zero culling distance clears the candidate cache"), Manager->GetNearbyInteractionPoints().IsEmpty());
-	TestNull(TEXT("An empty manager cache yields no selection"), Hand->FindPointForInteraction().Point);
+	TestNull(TEXT("An empty manager cache yields no selection"), Hand->FindPointForInteraction().Point.Get());
 	Manager->SetInteractionDetectionCullingDistance(100.f);
 	Manager->RefreshNearbyInteractionPoints();
 	Manager->DestroyComponent();
-	TestNull(TEXT("Destroying the manager safely disconnects hand selection"), Hand->FindPointForInteraction().Point);
+	TestNull(TEXT("Destroying the manager safely disconnects hand selection"), Hand->FindPointForInteraction().Point.Get());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHandRaySelectionTest, "VRShooter.Interaction.Selection.HandRay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHandRaySelectionTest::RunTest(const FString& Parameters)
+{
+	FHandSelectionWorld Scene;
+	AActor* Player = Scene.AddActor();
+	UHandSlot* Hand = Scene.AddHand(Player);
+	UGrabManager* Manager = Player->FindComponentByClass<UGrabManager>();
+	AItemCube* Item = Scene.World->SpawnActor<AItemCube>();
+	Scene.Actors.Add(Item);
+	UStaticMeshComponent* Mesh = CastChecked<UStaticMeshComponent>(Item->GetRootComponent());
+	Mesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
+	Item->SetActorScale3D(FVector(0.2));
+	Item->SetActorLocation(FVector(110., 0., 0.));
+	UInteractionPoint* Main = Scene.AddPoint(Item, 0.f, InteractablePointType::Hand);
+	UInteractionPoint* Other = Scene.AddPoint(Item, 0.f, InteractablePointType::Hand);
+	AActor* NearbyActor = Scene.AddActor();
+	UInteractionPoint* Nearby = Scene.AddPoint(NearbyActor, 20.f, InteractablePointType::Hand);
+	Scene.BeginPlay();
+
+	TestTrue(TEXT("Proximity selection has priority over the ray"), Hand->FindPointForInteraction().Point.Get() == Nearby);
+	Nearby->SetInteractionRange(0.f);
+	FInteractionPointResult Result = Hand->FindPointForInteraction();
+	TestNull(TEXT("Ray selection requires an explicitly marked MainPoint"), Result.Point.Get());
+	TestNull(TEXT("No MainPoint is inferred from unmarked points"), Cast<IInteractable>(Item)->GetMainPoint());
+	Manager->Grab(InteractablePointHand::Left);
+	TestNull(TEXT("Grab without a MainPoint makes no request"), Hand->GetRequestedInteractionPoint());
+
+	FBoolProperty* MainFlag = FindFProperty<FBoolProperty>(UInteractionPoint::StaticClass(), TEXT("bIsMainPoint"));
+	check(MainFlag);
+	MainFlag->SetPropertyValue_InContainer(Main, true);
+	TestTrue(TEXT("GetMainPoint returns the explicitly marked component"), Cast<IInteractable>(Item)->GetMainPoint() == Main);
+	TestTrue(TEXT("The ray directly selects the MainPoint beyond the grip range"), Hand->FindPointForInteraction().Point.Get() == Main);
+	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+	Manager->Grab(InteractablePointHand::Left);
+	TestTrue(TEXT("Ray Grab requests the MainPoint rather than another grip"), Hand->GetRequestedInteractionPoint() == Main);
+	TestFalse(TEXT("An item with an in-flight grip is not free"), Item->IsFreeForInteraction());
+	Manager->Release(InteractablePointHand::Left);
+
+	Other->Reserve(Hand, Item->NextOwnershipId(), false);
+	TestNull(TEXT("A reservation on any grip excludes the entire actor"), Hand->FindPointForInteraction().Point.Get());
+	Other->ReleaseReservation(Hand);
+	TestTrue(TEXT("Releasing the reservation makes the MainPoint selectable again"), Hand->FindPointForInteraction().Point.Get() == Main);
+
+	AActor* Wall = Scene.AddActor();
+	USphereComponent* WallBody = CastChecked<USphereComponent>(Wall->GetRootComponent());
+	WallBody->SetSphereRadius(5.f);
+	WallBody->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	WallBody->SetCollisionResponseToAllChannels(ECR_Block);
+	Wall->SetActorLocation(FVector(50., 0., 0.));
+	TestNull(TEXT("The ray does not select an item through a wall"), Hand->FindPointForInteraction().Point.Get());
+	WallBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	Item->SetActorLocation(FVector(170., 0., 0.));
+	TestNull(TEXT("The ray stops at 150 world centimeters"), Hand->FindPointForInteraction().Point.Get());
+	Item->SetActorLocation(FVector(0., 110., 0.));
+	Player->GetRootComponent()->SetWorldRotation(FRotator(0., 90., 0.));
+	TestTrue(TEXT("Ray direction follows the physical hand rotation"), Hand->FindPointForInteraction().Point.Get() == Main);
+	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+
+	Main->UnregisterComponent();
+	TestNull(TEXT("An unregistered MainPoint cannot be requested"), Item->GetMainPoint());
+	Manager->Grab(InteractablePointHand::Left);
+	TestNull(TEXT("Grab rejects an unavailable MainPoint"), Hand->GetRequestedInteractionPoint());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHandCachedGrabTest, "VRShooter.Interaction.Selection.CachedGrab",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHandCachedGrabTest::RunTest(const FString& Parameters)
+{
+	FHandSelectionWorld Scene;
+	AActor* Player = Scene.AddActor();
+	UHandSlot* Hand = Scene.AddHand(Player);
+	UGrabManager* Manager = Player->FindComponentByClass<UGrabManager>();
+	AItemCube* Item = Scene.World->SpawnActor<AItemCube>();
+	Scene.Actors.Add(Item);
+	UInteractionPoint* First = Scene.AddPoint(Item, 10.f, InteractablePointType::Hand);
+	UInteractionPoint* Second = Scene.AddPoint(Item, 30.f, InteractablePointType::Hand);
+	Scene.BeginPlay();
+
+	Manager->Grab(InteractablePointHand::Left);
+	TestNull(TEXT("Grab before the first hand tick makes no request"), Hand->GetRequestedInteractionPoint());
+	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+	Manager->Grab(InteractablePointHand::Right);
+	TestNull(TEXT("The manager only routes Grab to the requested hand"), Hand->GetRequestedInteractionPoint());
+	First->SetRelativeLocation(FVector(1000., 0., 0.));
+	Second->SetRelativeLocation(FVector(5., 0., 0.));
+	Hand->Grab();
+	TestTrue(TEXT("Grab uses the previous selection despite movement and a nearer alternative"), Hand->GetRequestedInteractionPoint() == First);
+	Manager->Grab(InteractablePointHand::Left);
+	TestTrue(TEXT("An occupied hand does not replace its request"), Hand->GetRequestedInteractionPoint() == First);
+	Manager->Release(InteractablePointHand::Left);
+
+	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+	Second->UnregisterComponent();
+	Manager->Grab(InteractablePointHand::Left);
+	TestNull(TEXT("Grab rejects an unregistered cached point"), Hand->GetRequestedInteractionPoint());
+	Second->RegisterComponent();
+	Manager->Grab(InteractablePointHand::Left);
+	TestTrue(TEXT("Manager Grab forwards the cached hand selection"), Hand->GetRequestedInteractionPoint() == Second);
+	Manager->Release(InteractablePointHand::Left);
+
+	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+	Second->DestroyComponent();
+	First->SetRelativeLocation(FVector(10., 0., 0.));
+	TestTrue(TEXT("A fresh query can find an alternative"), Hand->FindPointForInteraction().Point.Get() == First);
+	Manager->Grab(InteractablePointHand::Left);
+	TestNull(TEXT("A destroyed cached point is ignored without a new search"), Hand->GetRequestedInteractionPoint());
+	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+	Manager->Grab(InteractablePointHand::Left);
+	TestTrue(TEXT("The next hand tick updates the cached selection"), Hand->GetRequestedInteractionPoint() == First);
+	Manager->Release(InteractablePointHand::Left);
 	return true;
 }
 

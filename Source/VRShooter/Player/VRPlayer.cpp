@@ -16,10 +16,12 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "InteractiveSystem/Player/Component/HandSlot.h"
+#include "DrawDebugHelpers.h"
 
 AVRPlayer::AVRPlayer() : ABasicPlayer()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
 
 	VROrigin = CreateDefaultSubobject<USceneComponent>(TEXT("VRCameraRoot"));
 	VROrigin->SetupAttachment(GetRootComponent());
@@ -49,6 +51,35 @@ AVRPlayer::AVRPlayer() : ABasicPlayer()
 
 	CreateHandSlot(LeftHandSlot, TEXT("Left hand slot"), InteractablePointHand::Left, LeftMotionControllerSimulated);
 	CreateHandSlot(RightHandSlot, TEXT("Right hand slot"), InteractablePointHand::Right, RightMotionControllerSimulated);
+}
+
+void AVRPlayer::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+#if ENABLE_DRAW_DEBUG
+	if (!IsLocallyControlled() || GetNetMode() == NM_DedicatedServer)
+		return;
+
+	const auto DrawHandRay = [this](UHandSlot* Hand, const FColor& Color)
+	{
+		FVector Start, End;
+		if (IsValid(Hand) && Hand->GetInteractionRay(Start, End))
+			DrawDebugLine(GetWorld(), Start, End, Color, false, -1.f, 0, 0.2f);
+	};
+
+	DrawHandRay(LeftHandSlot, FColor::Cyan);
+	DrawHandRay(RightHandSlot, FColor::Orange);
+#endif
+}
+
+FRotator AVRPlayer::GetHandRayAngleOffset(InteractablePointHand Hand) const
+{
+	if (Hand == InteractablePointHand::Left)
+		return LeftHandRayAngleOffset;
+	if (Hand == InteractablePointHand::Right)
+		return RightHandRayAngleOffset;
+	return FRotator::ZeroRotator;
 }
 
 void AVRPlayer::CreateHandSlot(TObjectPtr<UHandSlot>& Slot, FName SlotName,

@@ -4,6 +4,11 @@
 #include "InteractiveSystem/Player/Component/HandSlot.h"
 
 #include "Components/PrimitiveComponent.h"
+#include "Components/MeshComponent.h"
+#include "Engine/World.h"
+#include "InteractiveSystem/Actor/InteractableActor.h"
+#include "InteractiveSystem/Component/InteractionPoint.h"
+#include "Player/VRPlayer.h"
 #include "GameFramework/Actor.h"
 #include "InteractiveSystem/Player/Component/GrabManager.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
@@ -20,7 +25,27 @@ void UHandSlot::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompon
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	if (WeldedBody.IsValid() && !IsWeldedTo(WeldedPoint.Get()))
 		Unweld(WeldedPoint.Get());
-	FindPointForInteraction();
+	
+	CachedInteractionResult = FindPointForInteraction();
+}
+
+void UHandSlot::Grab()
+{
+	if (!IsHandFree())
+		return;
+	IInteractablePoint* Candidate = CachedInteractionResult.Point.Get();
+	if (!Candidate
+		|| !Candidate->IsInteractionEnabled()
+		|| !IsValid(Candidate->GetPointOwner())
+		|| !CanInteractWith(Candidate))
+		return;
+	if (UInteractionPoint* Point = Cast<UInteractionPoint>(Candidate->_getUObject()))
+		RequestInteraction(Point);
+}
+
+void UHandSlot::Release()
+{
+	RequestInteraction(nullptr);
 }
 
 bool UHandSlot::IsAvailableForInteraction() const
@@ -30,20 +55,31 @@ bool UHandSlot::IsAvailableForInteraction() const
 
 bool UHandSlot::IsWeldedTo(const IInteractableSlavePoint* SlavePoint) const
 {
-	return SlavePoint && WeldedPoint.Get() == SlavePoint && WeldedBody.IsValid() &&
-		WeldedBody->IsSimulatingPhysics() && IsValid(PhysicalHand) && PhysicalHand->IsSimulatingPhysics() &&
-		IsValid(WeldConstraint) && WeldConstraint->ConstraintInstance.IsValidConstraintInstance();
+	return SlavePoint 
+		&& WeldedPoint.Get() == SlavePoint 
+		&& WeldedBody.IsValid() 
+		&& WeldedBody->IsSimulatingPhysics() 
+		&& IsValid(PhysicalHand) 
+		&& PhysicalHand->IsSimulatingPhysics() 
+		&& IsValid(WeldConstraint) 
+		&& WeldConstraint->ConstraintInstance.IsValidConstraintInstance();
 }
 
-bool UHandSlot::Weld(IInteractableSlavePoint* SlavePoint)
+bool UHandSlot::Weld(IInteractableSlavePoint* SlavePoint, bool bTeleportToSlave)
 {
 	if (!SlavePoint || !IsValid(SlavePoint->_getUObject()))
 		return false;
+	
 	if (IsWeldedTo(SlavePoint))
 		return true;
-	if (WeldedBody.IsValid() || !IsValid(PhysicalHand) || !PhysicalHand->IsSimulatingPhysics() || !IsValid(WeldConstraint) ||
-		!IsValid(SlavePoint->GetPointOwner()) || SlavePoint->GetPointOwner() == GetOwner() ||
-		(GetRequestedInteractionPoint() && GetRequestedInteractionPoint() != SlavePoint))
+	
+	if (WeldedBody.IsValid() 
+		|| !IsValid(PhysicalHand) 
+		|| !PhysicalHand->IsSimulatingPhysics() 
+		|| !IsValid(WeldConstraint) 
+		|| !IsValid(SlavePoint->GetPointOwner()) 
+		|| SlavePoint->GetPointOwner() == GetOwner() 
+		|| (GetRequestedInteractionPoint() && GetRequestedInteractionPoint() != SlavePoint))
 		return false;
 
 	UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(SlavePoint->GetPointOwner()->GetRootComponent());
@@ -51,11 +87,23 @@ bool UHandSlot::Weld(IInteractableSlavePoint* SlavePoint)
 		!Body->GetBodyInstance() || !Body->GetBodyInstance()->IsValidBodyInstance())
 		return false;
 
+	const FTransform InitialHandTransform = PhysicalHand->GetComponentTransform();
+	const FTransform WeldTransform = bTeleportToSlave ? SlavePoint->GetPointTransform() : GetPointTransform();
+	if (bTeleportToSlave)
+	{
+		// The animated grip socket can be offset from the simulated hand body.
+		// Move that grip frame to the item without changing the tracking target.
+		const FTransform GripInHand = GetPointTransform().GetRelativeTransform(InitialHandTransform);
+		const FQuat HandRotation = (WeldTransform.GetRotation() * GripInHand.GetRotation().Inverse()).GetNormalized();
+		const FVector HandLocation = WeldTransform.GetLocation() - HandRotation.RotateVector(InitialHandTransform.GetScale3D() * GripInHand.GetLocation());
+		PhysicalHand->SetWorldLocationAndRotation(HandLocation, HandRotation, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
 	const bool bWasSimulating = Body->IsSimulatingPhysics();
 	const bool bHadGravity = Body->IsGravityEnabled();
 	Body->SetEnableGravity(false);
 	Body->SetSimulatePhysics(true);
-	WeldConstraint->SetWorldLocationAndRotation(GetComponentLocation(), GetComponentQuat());
+	WeldConstraint->SetWorldLocationAndRotation(WeldTransform.GetLocation(), WeldTransform.GetRotation());
 	WeldConstraint->SetDisableCollision(true);
 	WeldConstraint->SetConstrainedComponents(PhysicalHand, NAME_None, Body, NAME_None);
 	if (!Body->IsSimulatingPhysics() || !WeldConstraint->ConstraintInstance.IsValidConstraintInstance())
@@ -65,6 +113,8 @@ bool UHandSlot::Weld(IInteractableSlavePoint* SlavePoint)
 		WeldConstraint->OverrideComponent2.Reset();
 		Body->SetSimulatePhysics(bWasSimulating);
 		Body->SetEnableGravity(bHadGravity);
+		if (bTeleportToSlave)
+			PhysicalHand->SetWorldTransform(InitialHandTransform, false, nullptr, ETeleportType::TeleportPhysics);
 		return false;
 	}
 
@@ -99,14 +149,37 @@ bool UHandSlot::CanUseInteractionPoint(IInteractablePoint* Point)
 		|| !Point->IsInteractionEnabled()
 		|| !IsValid(Point->GetPointOwner()))
 		return false;
+	
 	const float Range = Point->GetInteractionRange();
-	return Range > 0.f && FVector::DistSquared(GetPointLocation(), Point->GetPointLocation()) < FMath::Square(static_cast<double>(Range)) && CanInteractWith(Point);
+	return Range > 0.f 
+		&& FVector::DistSquared(GetPointLocation(), Point->GetPointLocation()) < FMath::Square(static_cast<double>(Range)) 
+		&& CanInteractWith(Point);
+}
+
+bool UHandSlot::GetInteractionRay(FVector& Start, FVector& End)
+{
+	if (!IsValid(PhysicalHand) || !PhysicalHand->IsRegistered())
+		return false;
+	const AVRPlayer* Player = Cast<AVRPlayer>(GetOwner());
+	const FRotator AngleOffset = Player ? Player->GetHandRayAngleOffset(GetInteractablePointHand()) : FRotator::ZeroRotator;
+	Start = PhysicalHand->GetComponentLocation();
+	End = Start + PhysicalHand->GetComponentQuat().RotateVector(AngleOffset.Vector()) * 150.f;
+	return true;
 }
 
 FInteractionPointResult UHandSlot::FindPointForInteraction()
 {
-	FInteractionPointResult Result;
+	FInteractionPointResult Result = FindPointByRange();
+	if (!Result.Point.IsValid())
+		Result = FindPointByRaycast();
+	
+	return Result;
+}
 
+FInteractionPointResult UHandSlot::FindPointByRange()
+{
+	FInteractionPointResult Result;
+	
 	const UGrabManager* Manager = GrabManager.Get();
 	if (!IsValid(Manager))
 		return Result;
@@ -134,6 +207,35 @@ FInteractionPointResult UHandSlot::FindPointForInteraction()
 			Result.bIsInventorySlot = Point->IsInventorySlot();
 		}
 	}
+	
+	return Result;
+}
+
+FInteractionPointResult UHandSlot::FindPointByRaycast()
+{
+	FInteractionPointResult Result;
+	
+	if(!IsHandFree())
+		return Result;
+
+	FVector Start, End;
+	if (GetInteractionRay(Start, End))
+	{
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(HandInteractionRay), true, GetOwner());
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+			if (AInteractableActor* Actor = Cast<AInteractableActor>(Hit.GetActor()))
+				if (Cast<UMeshComponent>(Hit.GetComponent()) && Actor->IsFreeForInteraction())
+				{
+					IInteractableSlavePoint* MainPoint = Actor->GetMainPoint();
+					if (MainPoint && MainPoint->IsInteractionEnabled()
+						&& MainPoint->GetPointOwner() == Actor
+						&& MainPoint->GetInteractablePointType() == GetInteractablePointType()
+						&& MainPoint->SupportsHand(GetInteractablePointHand()))
+						Result.Point = MainPoint;
+				}
+	}
+	
 	return Result;
 }
 
@@ -191,6 +293,7 @@ void UHandSlot::SetGrabManager(UGrabManager* InGrabManager)
 		return;
 	if (GrabManager.Get() == InGrabManager)
 		return;
+	CachedInteractionResult = FInteractionPointResult();
 	if (GrabManager.IsValid())
 		RemoveTickPrerequisiteComponent(GrabManager.Get());
 	GrabManager = InGrabManager;
@@ -201,7 +304,10 @@ void UHandSlot::SetGrabManager(UGrabManager* InGrabManager)
 void UHandSlot::SetPhysicalHand(UPrimitiveComponent* InPhysicalHand)
 {
 	if (PhysicalHand != InPhysicalHand)
+	{
 		Unweld(WeldedPoint.Get());
+		CachedInteractionResult = FInteractionPointResult();
+	}
 	PhysicalHand = InPhysicalHand;
 }
 
