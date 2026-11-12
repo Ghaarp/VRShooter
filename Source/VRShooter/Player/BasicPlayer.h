@@ -35,7 +35,7 @@ class VRSHOOTER_API ABasicPlayer : public ACharacter,
 
 public:
 	// Sets default values for this pawn's properties
-	ABasicPlayer();
+	ABasicPlayer(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -84,7 +84,8 @@ protected:
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCameraComponent> CameraComponent;
 
-	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	// Blueprint compatibility alias for ACharacter's single native mesh component.
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true", DisplayName = "FullBodyMesh"))
 	TObjectPtr<USkeletalMeshComponent> FullBodyMesh;
 
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))

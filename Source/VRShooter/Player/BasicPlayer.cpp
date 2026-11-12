@@ -15,13 +15,15 @@
 
 
 // Sets default values
-ABasicPlayer::ABasicPlayer() : ACharacter()
+ABasicPlayer::ABasicPlayer(const FObjectInitializer& ObjectInitializer) : ACharacter(ObjectInitializer)
 {
  	// Set this pawn to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
-	FullBodyMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FullBodyMesh"));
-	FullBodyMesh->SetupAttachment(GetRootComponent());
+	// Keep ACharacter's mesh identity for movement smoothing and root motion.
+	FullBodyMesh = GetMesh();
+	FullBodyMesh->SetCollisionProfileName(TEXT("NoCollision"));
+	FullBodyMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	
 	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("ActorCamera"));
 

@@ -12,7 +12,9 @@
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Rendering/SlateRenderer.h"
 #include "Fonts/FontMeasure.h"
@@ -47,7 +49,7 @@ bool FInteractionUILayoutTest::RunTest(const FString& Parameters)
 		return Build(Point, 100., FVector2D(25., 25.), 8, {}, FVector2D(35., 25.), 28., 5., 1., Previous, Threshold, Layout);
 	};
 	TestTrue(TEXT("A point in front produces a layout"), BuildLayout(FVector(50., 12.5, 0.)));
-	TestEqual(TEXT("Eight implicit anchors"), Layout.Anchors.Num(), 8);
+	TestEqual(TEXT("Only two horizontal anchors remain"), Layout.Anchors.Num(), 2);
 	TestEqual(TEXT("Right anchor selected by projected direction"), Layout.SelectedAnchor, 0);
 	const FVector NearAnchor = Layout.Anchor;
 	BuildLayout(FVector(500., 125., 0.));
@@ -57,18 +59,19 @@ bool FInteractionUILayoutTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Behind-camera point hides instead of dividing by negative depth"), BuildLayout(FVector(-50., 0., 0.)));
 	TestFalse(TEXT("Camera-plane point is rejected"), BuildLayout(FVector(0., 20., 0.)));
 
-	// Just across the boundary between right and upper-right.
-	const FVector BoundaryPoint(100., 25. * FMath::Cos(FMath::DegreesToRadians(23.)), 25. * FMath::Sin(FMath::DegreesToRadians(23.)));
-	BuildLayout(BoundaryPoint);
-	TestEqual(TEXT("Strict nearest switches at the boundary"), Layout.SelectedAnchor, 1);
-	BuildLayout(BoundaryPoint, 0, 0.15);
-	TestEqual(TEXT("Hysteresis keeps the old anchor near the boundary"), Layout.SelectedAnchor, 0);
-	BuildLayout(FVector(100., 0., 25.), 0, 0.15);
-	TestEqual(TEXT("Hysteresis allows a clearly better anchor"), Layout.SelectedAnchor, 2);
+	for (double Side : {-100., -0.001, 0., 0.001, 100.})
+		for (InteractablePointHand Hand : {InteractablePointHand::Left, InteractablePointHand::Right})
+		{
+			Build(FVector(100., Side, Side), 100., FVector2D(25., 18.), 8,
+				{FVector2D(0., 1.)}, FVector2D(35., 25.), 28., 5., 1., 7, 0.95, Layout, Hand);
+			TestEqual(TEXT("Legacy anchor settings cannot add or switch points"), Layout.Anchors.Num(), 2);
+			TestTrue(TEXT("Hand keeps its fixed horizontal anchor across the view center"),
+				Layout.Anchor.Equals(FVector(100., Hand == InteractablePointHand::Left ? -25. : 25., 0.), 0.0001));
+		}
 
 	Build(FVector(100., -20., 10.), 100., FVector2D(1000., 1000.), 0,
 		{FVector2D(-10., 0.), FVector2D(0., 20.)}, FVector2D(20., 15.), 200., 100., 10., INDEX_NONE, 0., Layout);
-	TestEqual(TEXT("Custom directions replace the generated count"), Layout.Anchors.Num(), 2);
+	TestEqual(TEXT("Custom directions cannot replace the fixed hand anchors"), Layout.Anchors.Num(), 2);
 	const double SafeX = 100. * FMath::Tan(FMath::DegreesToRadians(20.));
 	const double SafeY = 100. * FMath::Tan(FMath::DegreesToRadians(15.));
 	TestTrue(TEXT("Entire label remains inside horizontal safe cone"), FMath::Abs(Layout.LabelCenter.Y) + Layout.LabelSize.X * 0.5 <= SafeX + UE_SMALL_NUMBER);
@@ -144,12 +147,23 @@ bool FInteractionUIComponentTest::RunTest(const FString& Parameters)
 		UI->Initialize(Hand, Camera);
 		Hand->SetPointHand(InteractablePointHand::Left);
 		UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
-		TestTrue(TEXT("Bound left hand places label left of the right-side anchor"),
-			FMath::IsNearlyEqual(Label->GetComponentLocation().Y, 25. - GetLineWidth() * 0.5));
+		TestEqual(TEXT("Bound left hand uses the left anchor"), UI->GetSelectedAnchorIndex(), 1);
+		TestTrue(TEXT("Bound left hand places label left of its fixed anchor"),
+			FMath::IsNearlyEqual(Label->GetComponentLocation().Y, -25. - GetLineWidth() * 0.5));
 		Hand->SetPointHand(InteractablePointHand::Right);
 		UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
 		TestTrue(TEXT("Bound right hand places label right of the same anchor"),
 			FMath::IsNearlyEqual(Label->GetComponentLocation().Y, 25. + GetLineWidth() * 0.5));
+		UI->AnchorRadiusPercent = 50.f;
+		UI->LineThicknessPercent = 200.f;
+		UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
+		TestTrue(TEXT("Radius percentage scales the original horizontal radius"),
+			FMath::IsNearlyEqual(Label->GetComponentLocation().Y, 12.5 + GetLineWidth() * 0.5));
+		for (UStaticMeshComponent* Line : Lines)
+			TestTrue(TEXT("Thickness percentage scales both lines"), FMath::IsNearlyEqual(
+				Line->GetStaticMesh()->GetBounds().BoxExtent.X * 2. * Line->GetComponentScale().X, 0.3, 0.0001));
+		UI->AnchorRadiusPercent = 100.f;
+		UI->LineThicknessPercent = 100.f;
 		UI->SetTarget(Point, FText::FromString(TEXT("iiii")));
 		UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
 		const double NarrowWidth = GetLineWidth();
@@ -178,6 +192,22 @@ bool FInteractionUIComponentTest::RunTest(const FString& Parameters)
 	}
 	for (UStaticMeshComponent* Line : Lines)
 	{
+		UMaterialInstanceDynamic* SolidMaterial = Cast<UMaterialInstanceDynamic>(Line->GetMaterial(0));
+		TestNotNull(TEXT("Each line has the solid UI material"), SolidMaterial);
+		for (int32 Index = 0; Index < Line->GetNumMaterials(); ++Index)
+			TestTrue(TEXT("All cylinder sections use the same UI material, including caps"), Line->GetMaterial(Index) == SolidMaterial);
+		if (SolidMaterial)
+		{
+			FLinearColor Tint;
+			SolidMaterial->GetVectorParameterValue(FMaterialParameterInfo(TEXT("TintColorAndOpacity")), Tint);
+			TestTrue(TEXT("Both segments receive white tint"), Tint.Equals(FLinearColor::White));
+			FLinearColor BackColor;
+			SolidMaterial->GetVectorParameterValue(FMaterialParameterInfo(TEXT("BackColor")), BackColor);
+			TestTrue(TEXT("Solid line backing is white rather than transparent black"), BackColor.Equals(FLinearColor::White));
+			UTexture* Texture = nullptr;
+			SolidMaterial->GetTextureParameterValue(FMaterialParameterInfo(TEXT("SlateUI")), Texture);
+			TestTrue(TEXT("Both segments use the white texture"), Texture && Texture->GetName() == TEXT("WhiteSquareTexture"));
+		}
 		TestTrue(TEXT("Each line disables depth testing"), Line->GetMaterial(0)->GetMaterial()->bDisableDepthTest != 0);
 		TestEqual(TEXT("UI does not participate in collision"), Line->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
 	}

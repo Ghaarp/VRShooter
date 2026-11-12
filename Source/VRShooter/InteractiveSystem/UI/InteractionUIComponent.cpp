@@ -3,6 +3,13 @@
 #include "InteractiveSystem/UI/InteractionUILayout.h"
 #include "InteractiveSystem/Player/Component/HandSlot.h"
 #include "Camera/CameraComponent.h"
+#include "InteractiveSystem/Component/InteractionPoint.h"
+#include "InteractiveSystem/UI/InteractionPointWidgetComponent.h"
+#include "ConvexVolume.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Kismet/GameplayStatics.h"
+#include "StereoRendering.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/StaticMesh.h"
@@ -52,6 +59,7 @@ void UInteractionUIComponent::Initialize(UHandSlot* InHandSlot, UCameraComponent
 		RemoveTickPrerequisiteComponent(HandSlot.Get());
 	if (Camera.IsValid())
 		RemoveTickPrerequisiteComponent(Camera.Get());
+	ReleasePointHighlight();
 	HandSlot = InHandSlot;
 	Camera = InCamera;
 	if (HandSlot.IsValid())
@@ -71,6 +79,7 @@ void UInteractionUIComponent::SetTarget(IInteractablePoint* InPoint, const FText
 	}
 	if (Target.Get() != InPoint)
 	{
+		ReleasePointHighlight();
 		SelectedAnchor = INDEX_NONE;
 		SetCalloutVisible(false);
 	}
@@ -93,6 +102,7 @@ void UInteractionUIComponent::SetTargetObject(UObject* InPoint, FText DisplayNam
 
 void UInteractionUIComponent::ClearTarget()
 {
+	ReleasePointHighlight();
 	Target.Reset();
 	TargetText = FText::GetEmpty();
 	SelectedAnchor = INDEX_NONE;
@@ -103,7 +113,10 @@ FText UInteractionUIComponent::ResolveTargetText_Implementation(UObject* PointOb
 {
 	const IInteractablePoint* Point = IsValid(PointObject) ? Cast<IInteractablePoint>(PointObject) : nullptr;
 	const AActor* Owner = Point ? Point->GetPointOwner() : nullptr;
-	// Runtime-safe diagnostic fallback. Supply localized item text via SetTarget or this event.
+	const FText DisplayName = Point ? Point->GetInteractionDisplayName() : FText::GetEmpty();
+	if (!DisplayName.IsEmpty())
+		return DisplayName;
+	// Runtime-safe diagnostic fallback for custom unnamed points.
 	return IsValid(Owner) ? FText::FromString(Owner->GetName()) : FText::GetEmpty();
 }
 
@@ -159,7 +172,8 @@ bool UInteractionUIComponent::EnsureVisuals()
 	}
 	LineMaterial = UMaterialInstanceDynamic::Create(ActiveMaterial, this);
 	LineMaterial->SetTextureParameterValue(TEXT("SlateUI"), WhiteTexture);
-	LineMaterial->SetVectorParameterValue(TEXT("BackColor"), FLinearColor::Transparent);
+	// Solid mesh lines need a white backing as well as a white Slate texture.
+	LineMaterial->SetVectorParameterValue(TEXT("BackColor"), FLinearColor::White);
 	LineMaterial->SetScalarParameterValue(TEXT("OpacityFromTexture"), 1.f);
 
 	auto CreateSegment = [this](const TCHAR* Suffix)
@@ -168,7 +182,9 @@ bool UInteractionUIComponent::EnsureVisuals()
 		UStaticMeshComponent* Segment = NewObject<UStaticMeshComponent>(GetOwner(), Name, RF_Transient);
 		Segment->SetMobility(EComponentMobility::Movable);
 		Segment->SetStaticMesh(SegmentMesh);
-		Segment->SetMaterial(0, LineMaterial);
+		// Cylinder caps and sides can use different sections/material slots.
+		for (int32 MaterialIndex = 0; MaterialIndex < Segment->GetNumMaterials(); ++MaterialIndex)
+			Segment->SetMaterial(MaterialIndex, LineMaterial);
 		Segment->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Segment->SetGenerateOverlapEvents(false);
 		Segment->SetCastShadow(false);
@@ -245,18 +261,50 @@ FVector2D UInteractionUIComponent::MeasureLabel()
 void UInteractionUIComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	IInteractablePoint* Point = Target.Get();
-	if (!IsActive() || !IsLocalView() || !Point || !IsValid(Point->GetPointOwner()))
+	if (bFollowHandSelection)
 	{
+		UHandSlot* Hand = HandSlot.Get();
+		const bool bUseSelection = Hand
+			&& Hand->IsActive()
+			&& Hand->IsComponentTickEnabled()
+			&& IsLocalView();
+		SetTarget(bUseSelection ? Hand->GetCachedInteractionResult().Point.Get() : nullptr);
+	}
+	IInteractablePoint* Point = Target.Get();
+	if (!IsActive()
+		|| !IsLocalView()
+		|| !Point
+		|| (bFollowHandSelection && !Point->IsInteractionEnabled())
+		|| !IsValid(Point->GetPointOwner()))
+	{
+		ReleasePointHighlight();
 		SetCalloutVisible(false);
 		return;
 	}
+	UInteractionPointWidgetComponent* PointWidget = nullptr;
+	if (UInteractionPoint* ItemPoint = Cast<UInteractionPoint>(Point->_getUObject()))
+		for (USceneComponent* Child : ItemPoint->GetAttachChildren())
+			if ((PointWidget = Cast<UInteractionPointWidgetComponent>(Child)))
+				break;
+	if (PointWidget && IsTargetInView(Point) && PointWidget->RequestHighlight(this, Camera.Get()))
+	{
+		if (ActivePointWidget.Get() != PointWidget)
+			ReleasePointHighlight();
+		ActivePointWidget = PointWidget;
+		SetCalloutVisible(false);
+		return;
+	}
+	ReleasePointHighlight();
 	// Ignore actor/component scale. Only WorldToMeters changes physical UI size.
 	const FTransform View(Camera->GetComponentQuat(), Camera->GetComponentLocation());
 	const double UnitsPerCentimeter = FMath::Max(0.01f, GetWorld()->GetWorldSettings()->WorldToMeters / 100.f);
 	const FVector PointLocation = Point->GetPointLocation();
 	const InteractablePointHand Hand = HandSlot.IsValid() ? HandSlot->GetInteractablePointHand() : InteractablePointHand::None;
-	const FVector LocalPoint = View.InverseTransformPosition(PointLocation) / UnitsPerCentimeter;
+	FVector LocalPoint = View.InverseTransformPosition(PointLocation) / UnitsPerCentimeter;
+	const FVector TargetLocalPoint = LocalPoint;
+	const bool bBehindCamera = LocalPoint.X <= UE_SMALL_NUMBER;
+	if (bBehindCamera)
+		LocalPoint = FVector(Distance, LocalPoint.Y < 0. ? -Distance * 2. : Distance * 2., 0.);
 	if (LocalPoint.ContainsNaN() || LocalPoint.X <= UE_SMALL_NUMBER || !EnsureVisuals())
 	{
 		SetCalloutVisible(false);
@@ -267,9 +315,7 @@ void UInteractionUIComponent::TickComponent(float DeltaTime, ELevelTick TickType
 		FMath::Max(1.f, LabelWidth) / MeasuredSize.X);
 	const FVector2D DesiredSize = MeasuredSize * TextScale;
 	InteractionUILayout::FLayout Layout;
-	if (!InteractionUILayout::Build(LocalPoint,
-		Distance, AnchorRadii, AnchorCount, AnchorDirections, SafeHalfAngles, DesiredSize.X, DesiredSize.Y, LabelGap,
-		SelectedAnchor, AnchorSwitchThreshold, Layout, Hand))
+	if (!BuildCalloutLayout(TargetLocalPoint, DesiredSize, Hand, DeltaTime, Layout))
 	{
 		SetCalloutVisible(false);
 		return;
@@ -277,10 +323,11 @@ void UInteractionUIComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	SelectedAnchor = Layout.SelectedAnchor;
 	const FVector Anchor = View.TransformPosition(Layout.Anchor * UnitsPerCentimeter);
 	const FVector End = View.TransformPosition(Layout.End * UnitsPerCentimeter);
-	const float Thickness = FMath::Max(0.01f, LineThickness) * UnitsPerCentimeter;
-	UpdateSegment(Connector, PointLocation, Anchor, Thickness);
+	const float Thickness = FMath::Max(0.01f, LineThickness) * (FMath::Max(1.f, LineThicknessPercent) / 100.f) * UnitsPerCentimeter;
+	UpdateSegment(Connector, bBehindCamera ? View.TransformPosition(LocalPoint * UnitsPerCentimeter) : PointLocation, Anchor, Thickness);
 	UpdateSegment(Underline, Anchor, End, Thickness);
 	LineMaterial->SetVectorParameterValue(TEXT("TintColorAndOpacity"), Color);
+	LineMaterial->SetVectorParameterValue(TEXT("BackColor"), Color);
 	Connector->SetTranslucentSortPriority(SortPriority);
 	Underline->SetTranslucentSortPriority(SortPriority);
 	Label->SetTranslucentSortPriority(SortPriority + 1);
@@ -297,12 +344,81 @@ void UInteractionUIComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	SetCalloutVisible(true);
 }
 
+bool UInteractionUIComponent::BuildCalloutLayout(const FVector& LocalPoint, const FVector2D& DesiredSize,
+	InteractablePointHand Hand, float DeltaTime, InteractionUILayout::FLayout& Layout)
+{
+	// Preserve the original fixed-anchor layout, including its behind-camera fallback.
+	const FVector LayoutPoint = LocalPoint.X <= UE_SMALL_NUMBER
+		? FVector(Distance, LocalPoint.Y < 0. ? -Distance * 2. : Distance * 2., 0.) : LocalPoint;
+	const FVector2D ScaledRadii = AnchorRadii * (FMath::Max(0.f, AnchorRadiusPercent) / 100.f);
+	const FVector2D FittedRadii = InteractionUILayout::FitToSafeArea(Distance, ScaledRadii, SafeHalfAngles,
+		FMath::Max(1.f, LabelWidth), FMath::Max(0.1f, LabelHeight), LabelGap).AnchorRadii;
+	return InteractionUILayout::Build(LayoutPoint,
+		Distance, FittedRadii, 2, {}, SafeHalfAngles, DesiredSize.X, DesiredSize.Y, LabelGap,
+		SelectedAnchor, AnchorSwitchThreshold, Layout, Hand);
+}
+
 void UInteractionUIComponent::UpdateSegment(UStaticMeshComponent* Segment, const FVector& Start, const FVector& End, float Thickness)
 {
 	const FVector Direction = End - Start;
 	const FVector MeshSize = SegmentMesh->GetBounds().BoxExtent * 2.;
 	Segment->SetWorldTransform(FTransform(FRotationMatrix::MakeFromZ(Direction.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector)).ToQuat(),
 		(Start + End) * 0.5, FVector(Thickness / MeshSize.X, Thickness / MeshSize.Y, FMath::Max(Direction.Length(), 0.001) / MeshSize.Z)));
+}
+
+void UInteractionUIComponent::ReleasePointHighlight()
+{
+	if (ActivePointWidget.IsValid())
+		ActivePointWidget->ReleaseHighlight(this);
+	ActivePointWidget.Reset();
+}
+
+bool UInteractionUIComponent::IsTargetInView(const IInteractablePoint* Point) const
+{
+	FVector Origin, Extent;
+	// Use item geometry even when its collision is disabled; attached widgets must not expand the bounds.
+	FBox Bounds(ForceInit);
+	for (const UMeshComponent* Mesh : TInlineComponentArray<UMeshComponent*>(Point->GetPointOwner()))
+		if (Mesh->IsRegistered() && !Mesh->IsA<UWidgetComponent>())
+			Bounds += Mesh->Bounds.GetBox();
+	Origin = Bounds.IsValid ? Bounds.GetCenter() : Point->GetPointLocation();
+	Extent = Bounds.IsValid ? Bounds.GetExtent() : FVector::ZeroVector;
+	// A small exit margin prevents rapid switching at the view boundary.
+	if (ActivePointWidget.IsValid())
+		Extent += FVector(2. * GetWorld()->GetWorldSettings()->WorldToMeters / 100.);
+	FMinimalViewInfo View;
+	View.Location = Camera->GetComponentLocation();
+	View.Rotation = Camera->GetComponentRotation();
+	View.FOV = Camera->FieldOfView;
+	View.AspectRatio = Camera->AspectRatio;
+	if (!Camera->bConstrainAspectRatio && GEngine->GameViewport && GEngine->GameViewport->Viewport)
+	{
+		const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
+		if (Size.Y > 0)
+			View.AspectRatio = double(Size.X) / Size.Y;
+	}
+	const auto Stereo = GEngine->StereoRenderingDevice;
+	const bool bStereo = Stereo.IsValid() && Stereo->IsStereoEnabled();
+	const int32 ViewCount = bStereo ? Stereo->GetDesiredNumberOfViews(true) : 1;
+	for (int32 Eye = 0; Eye < ViewCount; ++Eye)
+	{
+		FMinimalViewInfo EyeView = View;
+		TOptional<FMatrix> Projection;
+		if (bStereo)
+		{
+			Stereo->CalculateStereoViewOffset(Eye, EyeView.Rotation,
+				GetWorld()->GetWorldSettings()->WorldToMeters, EyeView.Location);
+			Projection = Stereo->GetStereoProjectionMatrix(Eye);
+		}
+		FMatrix ViewMatrix, ProjectionMatrix, ViewProjection;
+		UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(EyeView, Projection,
+			ViewMatrix, ProjectionMatrix, ViewProjection);
+		FConvexVolume Frustum;
+		GetViewFrustumBounds(Frustum, ViewProjection, true, false);
+		if (Frustum.IntersectBox(Origin, Extent))
+			return true;
+	}
+	return false;
 }
 
 void UInteractionUIComponent::SetCalloutVisible(bool bVisible)
@@ -325,11 +441,13 @@ void UInteractionUIComponent::SetCalloutVisible(bool bVisible)
 void UInteractionUIComponent::Deactivate()
 {
 	Super::Deactivate();
+	ReleasePointHighlight();
 	SetCalloutVisible(false);
 }
 
 void UInteractionUIComponent::DestroyVisuals()
 {
+	ReleasePointHighlight();
 	SetCalloutVisible(false);
 	if (Label)
 		Label->DestroyComponent();

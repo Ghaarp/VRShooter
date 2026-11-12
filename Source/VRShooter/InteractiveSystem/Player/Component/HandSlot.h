@@ -37,11 +37,15 @@ public:
 	virtual bool UsesPhysicsAttachment() const override { return true; }
 	FInteractionPointResult FindPointForInteraction();
 	void Grab();
+	const FInteractionPointResult& GetCachedInteractionResult() const { return CachedInteractionResult; }
 	void Release();
 
 	UFUNCTION(Server, Reliable)
 	void ServerReleaseToInventory(UInventorySlot* Target, UInteractionPoint* SourcePoint, uint32 SourceAttachmentId,
 		uint32 ExpectedRevision, uint32 TargetRevision);
+	UFUNCTION(Server, Reliable)
+	void ServerGrabFromInventory(UInventorySlot* Source, UInteractionPoint* MainPoint, uint32 ExpectedRevision,
+		uint32 SourceRevision, uint32 SourceAttachmentId);
 	bool IsHandFree() const { return IsAvailableForInteraction(); }
 	
 	bool GetInteractionRay(FVector& Start, FVector& End);
@@ -65,6 +69,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UPhysicsConstraintComponent> WeldConstraint;
+
+	UPROPERTY()
+	TObjectPtr<UPhysicsConstraintComponent> DisableCapsuleCollision;
 
 	TWeakObjectPtr<UGrabManager> GrabManager;
 	// Updated by TickComponent; Grab consumes the last selection without another query.

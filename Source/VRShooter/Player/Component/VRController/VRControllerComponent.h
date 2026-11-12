@@ -114,13 +114,7 @@ private:
 	void Grab(InteractablePointHand Hand);
 	void Release(InteractablePointHand Hand);
 
-	void MoveActorOnly(FVector Offset);
-	void TurnActorOnly(float Amount);
-
 	void UpdateHMDTransform();
-	void PrepareCameraOrigin();
-	void SetActorLocationWithHMDOffset(float DeltaTime);
-	void SetActorRotationWithHMDRotation(float DeltaTime);
 	
-	void UpdateVRCamera();
+	void UpdateTrackingOriginHeight();
 };

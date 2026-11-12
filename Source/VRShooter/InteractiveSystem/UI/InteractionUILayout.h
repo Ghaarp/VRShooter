@@ -100,7 +100,7 @@ inline void PlaceLabel(FLayout& Layout, const FVector2D& LabelSize, double Gap, 
 	Layout.LabelSize = LabelSize;
 }
 
-/** Fit the callout into the safe cone, build anchors, choose one, and position its label. */
+/** Fixed horizontal hand anchors. Legacy count/direction/hysteresis arguments are ignored. */
 inline bool Build(const FVector& LocalPoint, double Distance, const FVector2D& Radii,
 	int32 Count, const TArray<FVector2D>& Directions, const FVector2D& SafeHalfAngles,
 	double Width, double Height, double Gap, int32 PreviousAnchor, double SwitchThreshold, FLayout& Out,
@@ -111,8 +111,10 @@ inline bool Build(const FVector& LocalPoint, double Distance, const FVector2D& R
 		return false;
 
 	const FLayoutDimensions Dimensions = FitToSafeArea(Distance, Radii, SafeHalfAngles, Width, Height, Gap);
-	Out.Anchors = BuildAnchors(Dimensions.Distance, Dimensions.AnchorRadii, Count, Directions);
-	Out.SelectedAnchor = FindClosestAnchor(LocalPoint, Out.Anchors, PreviousAnchor, SwitchThreshold);
+	Out.Anchors = {FVector(Dimensions.Distance, Dimensions.AnchorRadii.X, 0.),
+		FVector(Dimensions.Distance, -Dimensions.AnchorRadii.X, 0.)};
+	// Preserve index 0 for the right anchor; manual callers without a hand use it too.
+	Out.SelectedAnchor = Hand == InteractablePointHand::Left ? 1 : 0;
 	if (!Out.Anchors.IsValidIndex(Out.SelectedAnchor))
 		return false;
 

@@ -9,6 +9,7 @@
 #include "Settings/LevelEditorPlaySettings.h"
 #include "Tests/AutomationEditorCommon.h"
 #include "Tests/InventoryTestTypes.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -88,6 +89,10 @@ public:
 			return false;
 		if (State->Stage == 1)
 		{
+			// MainPoint configuration is authored locally, rather than replicated.
+			FBoolProperty* MainFlag = FindFProperty<FBoolProperty>(UInteractionPoint::StaticClass(), TEXT("bIsMainPoint"));
+			MainFlag->SetPropertyValue_InContainer(ClientGrip, true);
+			MainFlag->SetPropertyValue_InContainer(ServerGrip, true);
 			ClientPawn->Hand->RequestInteraction(ClientGrip);
 			State->Stage = 2;
 		}
@@ -140,7 +145,12 @@ public:
 				LateItem->GetRootComponent()->GetAttachSocketName() == TEXT("pelvis")
 				&& LateOuter->GetPointLocation().Equals(Slot->GetPointLocation(), 0.01)
 				&& LateOuter->GetPointTransform().GetRotation().Equals(Slot->GetPointTransform().GetRotation(), 0.001));
-			ClientPawn->Hand->RequestInteraction(ClientGrip);
+			ClientPawn->Hand->SetWorldLocation(ClientPawn->Inventory->GetPointLocation());
+			ClientPawn->Manager->RefreshNearbyInteractionPoints();
+			ClientPawn->Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+			Test->TestTrue(TEXT("Network extraction selects the occupied slot"),
+				ClientPawn->Hand->GetCachedInteractionResult().Point.GetObject() == ClientPawn->Inventory);
+			ClientPawn->Hand->Grab();
 			State->Stage = 5;
 		}
 		else if (State->Stage == 5)
@@ -150,6 +160,8 @@ public:
 			Test->TestNull(TEXT("Network extraction clears inventory"), ClientPawn->Inventory->GetRequestedInteractionPoint());
 			Test->TestNull(TEXT("Network extraction removes engine Attachment"), ClientItem->GetRootComponent()->GetAttachParent());
 			Test->TestTrue(TEXT("Network extraction restores a real hand weld"), ClientPawn->Hand->IsWeldedTo(ClientGrip));
+			Test->TestTrue(TEXT("Network extraction requests instant MainPoint attachment"),
+				ClientGrip->GetAttachmentState().bIsInstant && ServerGrip->GetAttachmentState().bIsInstant);
 			ClientPawn->Hand->RequestInteraction(nullptr);
 			State->Stage = 6;
 		}

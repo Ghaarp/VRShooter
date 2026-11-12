@@ -28,6 +28,7 @@ struct FInventoryWorld
 		Controller->SetAsLocalPlayerController();
 		Controller->Possess(Player);
 		Item = World->SpawnActor<AInventoryTestItem>();
+		FindFProperty<FBoolProperty>(UInteractionPoint::StaticClass(), TEXT("bIsMainPoint"))->SetPropertyValue_InContainer(Item->Grip, true);
 		Player->DispatchBeginPlay();
 		Item->DispatchBeginPlay();
 	}
@@ -110,7 +111,9 @@ bool FInventoryTransferTest::RunTest(const FString& Parameters)
 	Scene.FinishStore();
 	TestTrue(TEXT("Store completes a real engine attachment"), Scene.Player->Inventory->IsWeldedTo(Scene.Item->Outer));
 	const uint32 StoredOwnership = Scene.Item->Outer->GetAttachmentState().OwnershipId;
-	Scene.Player->Hand->RequestInteraction(Scene.Item->Grip);
+	Scene.Player->Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+	Scene.Player->Hand->Grab();
+	TestTrue(TEXT("Extraction completes instantly"), Scene.Player->Hand->IsWeldedTo(Scene.Item->Grip) && !Scene.Item->IsAttaching());
 	TestNull(TEXT("Extraction clears inventory occupancy"), Scene.Player->Inventory->GetRequestedInteractionPoint());
 	TestNull(TEXT("Extraction clears the engine attachment before moving to hand"), Scene.Item->GetRootComponent()->GetAttachParent());
 	TestTrue(TEXT("Extraction uses a new generation"), Scene.Item->Grip->GetAttachmentState().OwnershipId > StoredOwnership);
@@ -123,6 +126,47 @@ bool FInventoryTransferTest::RunTest(const FString& Parameters)
 	Scene.Player->Inventory->DestroyComponent();
 	TestNull(TEXT("Destroying inventory detaches the item"), Scene.Item->GetRootComponent()->GetAttachParent());
 	TestFalse(TEXT("Destroying inventory frees the item"), Scene.Item->IsAttached() || Scene.Item->IsAttaching());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInventorySelectionTest, "VRShooter.Interaction.Inventory.StoredSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FInventorySelectionTest::RunTest(const FString& Parameters)
+{
+	FInventoryWorld Scene;
+	Scene.Player->Inventory->RequestInteraction(Scene.Item->Outer);
+	Scene.FinishStore();
+	AInventoryTestPawn* Other = Scene.World->SpawnActor<AInventoryTestPawn>();
+	Other->DispatchBeginPlay();
+	for (AInventoryTestPawn* Player : {Scene.Player, Other})
+	{
+		TestFalse(TEXT("Stored item points cannot be reserved by any player"), Player->Hand->CanReserveInteractionPoint(Scene.Item->Grip));
+		Player->Hand->RequestInteraction(Scene.Item->Grip);
+		TestNull(TEXT("Direct server requests cannot extract stored points"), Player->Hand->GetRequestedInteractionPoint());
+	}
+	Scene.Item->Grip->InteractionDisplayName = FText::FromString(TEXT("Main grip"));
+	TestTrue(TEXT("The slot uses MainPoint display data"), Scene.Player->Inventory->GetInteractionDisplayName().EqualTo(Scene.Item->Grip->InteractionDisplayName));
+	Scene.Player->Hand->SetWorldLocation(Scene.Player->Inventory->GetPointLocation());
+	TestTrue(TEXT("Only the owner can select the occupied slot"), Scene.Player->Hand->CanUseInteractionPoint(Scene.Player->Inventory));
+	Other->Hand->SetWorldLocation(Scene.Player->Inventory->GetPointLocation());
+	TestFalse(TEXT("Another player cannot select the occupied slot"), Other->Hand->CanUseInteractionPoint(Scene.Player->Inventory));
+	Scene.Player->Hand->SetWorldLocation(Scene.Player->Inventory->GetPointLocation());
+	Scene.Player->Manager->RefreshNearbyInteractionPoints();
+	Scene.Player->Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Selection is anchored on the slot"), Scene.Player->Hand->GetCachedInteractionResult().Point.GetObject() == Scene.Player->Inventory);
+	const uint32 SourceId = Scene.Item->Outer->GetAttachmentState().AttachmentId;
+	Scene.Player->Hand->ServerGrabFromInventory(Scene.Player->Inventory, Scene.Item->Grip, Scene.Player->Hand->GetRequestRevision(),
+		Scene.Player->Inventory->GetRequestRevision(), SourceId - 1);
+	TestTrue(TEXT("A stale extraction leaves inventory intact"), Scene.Player->Inventory->IsWeldedTo(Scene.Item->Outer));
+	FindFProperty<FBoolProperty>(UInteractionPoint::StaticClass(), TEXT("bIsMainPoint"))->SetPropertyValue_InContainer(Scene.Item->Grip, false);
+	Scene.Player->Hand->Grab();
+	TestTrue(TEXT("Cached extraction rejects a missing MainPoint"), Scene.Player->Inventory->IsWeldedTo(Scene.Item->Outer));
+	FindFProperty<FBoolProperty>(UInteractionPoint::StaticClass(), TEXT("bIsMainPoint"))->SetPropertyValue_InContainer(Scene.Item->Grip, true);
+	Scene.Player->Hand->Grab();
+	TestTrue(TEXT("Grab instantly creates the MainPoint hand constraint"), Scene.Player->Hand->IsWeldedTo(Scene.Item->Grip));
+	TestFalse(TEXT("Extraction has no interpolation session"), Scene.Item->IsAttaching());
+	TestNull(TEXT("Extraction frees inventory"), Scene.Player->Inventory->GetRequestedInteractionPoint());
 	return true;
 }
 
@@ -332,10 +376,12 @@ bool FInventoryStickAssetTest::RunTest(const FString& Parameters)
 				Scene.Player->Mesh->AddWorldRotation(FRotator(5., 25., -10.));
 				TestTrue(TEXT("Outer follows the moving and rotating socket without item ticks"), Outer->GetPointLocation().Equals(Scene.Player->Inventory->GetPointLocation(), 0.001)
 					&& Outer->GetPointTransform().GetRotation().Equals(Scene.Player->Inventory->GetPointTransform().GetRotation(), 0.001));
-				Scene.Player->Hand->SetWorldLocation(Grip->GetPointLocation());
+				FindFProperty<FBoolProperty>(UInteractionPoint::StaticClass(), TEXT("bIsMainPoint"))->SetPropertyValue_InContainer(Grip, true);
+				Scene.Player->Hand->SetWorldLocation(Scene.Player->Inventory->GetPointLocation());
 				Scene.Player->Manager->RefreshNearbyInteractionPoints();
 				Scene.Player->Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
 				Scene.Player->Hand->Grab();
+				FindFProperty<FBoolProperty>(UInteractionPoint::StaticClass(), TEXT("bIsMainPoint"))->SetPropertyValue_InContainer(Grip, false);
 				TestNull(TEXT("Grab extracts Stick from inventory"), Scene.Player->Inventory->GetRequestedInteractionPoint());
 				TestNull(TEXT("Extraction detaches the capsule before hand attachment"), Body->GetAttachParent());
 				Stick->Tick(Stick->GetAttachmentTime());

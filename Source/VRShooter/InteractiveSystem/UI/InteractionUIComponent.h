@@ -8,6 +8,7 @@
 #include "InteractionUIComponent.generated.h"
 
 class UCameraComponent;
+class UInteractionPointWidgetComponent;
 class UHandSlot;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
@@ -19,7 +20,9 @@ class STextBlock;
 class SBox;
 class SScaleBox;
 
-/** Local VR callout. The caller supplies the hand's existing selection; this component never searches or grabs. */
+namespace InteractionUILayout { struct FLayout; }
+
+/** Local VR callout using a supplied target or the hand's cached selection; never searches or grabs. */
 UCLASS(ClassGroup=(Interaction), Blueprintable, meta=(BlueprintSpawnableComponent))
 class VRSHOOTER_API UInteractionUIComponent : public UActorComponent
 {
@@ -32,7 +35,7 @@ public:
 
 	/** Hand may be null. Its tick becomes a prerequisite, but no selection is polled from it. */
 	UFUNCTION(BlueprintCallable, Category="Interaction UI")
-	void Initialize(UHandSlot* InHandSlot, UCameraComponent* InCamera);
+	virtual void Initialize(UHandSlot* InHandSlot, UCameraComponent* InCamera);
 
 	void SetTarget(IInteractablePoint* InPoint, const FText& DisplayName = FText::GetEmpty());
 
@@ -40,9 +43,13 @@ public:
 	void SetTargetObject(UObject* InPoint, FText DisplayName);
 
 	UFUNCTION(BlueprintCallable, Category="Interaction UI")
-	void ClearTarget();
+	virtual void ClearTarget();
 
-	/** Temporary name adapter until IInteractablePoint exposes a display name. */
+	/** Follow the bound hand's cached selection after its tick. Manual SetTarget mode remains the default. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI")
+	bool bFollowHandSelection = false;
+
+	/** Uses the point's localized name, with a runtime object-name fallback. */
 	UFUNCTION(BlueprintNativeEvent, Category="Interaction UI")
 	FText ResolveTargetText(UObject* PointObject) const;
 
@@ -56,18 +63,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Layout", meta=(ClampMin="10.0", Units="cm"))
 	float Distance = 100.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Layout", meta=(ClampMin="0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category="Interaction UI|Layout", meta=(ClampMin="0.0"))
 	FVector2D AnchorRadii = FVector2D(25., 18.);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Layout", meta=(ClampMin="1", ClampMax="64"))
-	int32 AnchorCount = 8;
+	/** Scales the original anchor radius. 100 preserves the existing physical radius. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Layout", meta=(ClampMin="0.0", Units="Percent"))
+	float AnchorRadiusPercent = 100.f;
 
-	/** Nonempty overrides AnchorCount. Each nonzero entry is normalized before use. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Layout")
+	/** Legacy properties retained for serialized/Blueprint compatibility; fixed hand anchors ignore them. */
+	UPROPERTY(BlueprintReadWrite, Category="Interaction UI|Layout", meta=(DeprecatedProperty, DeprecationMessage="UI now uses two fixed hand anchors."))
+	int32 AnchorCount = 2;
+
+	UPROPERTY(BlueprintReadWrite, Category="Interaction UI|Layout", meta=(DeprecatedProperty, DeprecationMessage="UI now uses two fixed hand anchors."))
 	TArray<FVector2D> AnchorDirections;
 
-	/** Relative improvement required to switch anchors. Zero selects the nearest every frame. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Layout", meta=(ClampMin="0.0", ClampMax="0.95"))
+	UPROPERTY(BlueprintReadWrite, Category="Interaction UI|Layout", meta=(DeprecatedProperty, DeprecationMessage="Hand anchors no longer switch with target position."))
 	float AnchorSwitchThreshold = 0.15f;
 
 	/** Conservative reference cone, not a measurement of the headset's optical FOV. */
@@ -92,8 +102,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Appearance", meta=(ClampMin="0.0", Units="cm"))
 	float LabelGap = 1.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Appearance", meta=(ClampMin="0.01", Units="cm"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category="Interaction UI|Appearance", meta=(ClampMin="0.01", Units="cm"))
 	float LineThickness = 0.15f;
+
+	/** Scales both line diameters; 100 preserves the existing thickness. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Appearance", meta=(ClampMin="1.0", Units="Percent"))
+	float LineThicknessPercent = 100.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Interaction UI|Appearance")
 	FLinearColor Color = FLinearColor::White;
@@ -110,12 +124,19 @@ public:
 	int32 SortPriority = 10000;
 
 protected:
+	/** Presentation variants override only the joint layout; selection and rendering stay shared. */
+	virtual bool BuildCalloutLayout(const FVector& LocalPoint, const FVector2D& DesiredSize,
+		InteractablePointHand Hand, float DeltaTime, InteractionUILayout::FLayout& Layout);
+
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnUnregister() override;
 
 private:
 	bool IsLocalView() const;
+	bool IsTargetInView(const IInteractablePoint* Point) const;
+	void ReleasePointHighlight();
+	TWeakObjectPtr<UInteractionPointWidgetComponent> ActivePointWidget;
 	bool EnsureVisuals();
 	FVector2D MeasureLabel();
 	UMaterialInterface* GetOverlayMaterial();

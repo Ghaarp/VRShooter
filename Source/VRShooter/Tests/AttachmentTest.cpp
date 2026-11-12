@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -98,6 +99,83 @@ struct FAttachmentWorld
 		return Hand;
 	}
 };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPhysicsRestoreTest, "VRShooter.Interaction.Attachment.PhysicsRestore",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPhysicsRestoreTest::RunTest(const FString& Parameters)
+{
+	for (bool bSimulation : {false, true})
+		for (bool bGravity : {false, true})
+			for (bool bInstant : {false, true})
+			{
+				FAttachmentWorld Scene;
+				UStaticMeshComponent* HandBody;
+				UAttachmentTestHand* Hand = Scene.AddHand<UAttachmentTestHand>(HandBody);
+				UStaticMeshComponent* SecondBody;
+				UHandSlot* Second = Scene.AddHand(SecondBody);
+				UInteractionPoint* SecondPoint = Scene.AddPoint();
+				UInventorySlot* Inventory = NewObject<UInventorySlot>(Scene.Player);
+				Scene.Player->AddInstanceComponent(Inventory);
+				Inventory->SetPointType(InteractablePointType::None);
+				Inventory->SetupAttachment(Scene.Player->GetRootComponent());
+				Inventory->RegisterComponent();
+				UStaticMeshComponent* ExtraBody = NewObject<UStaticMeshComponent>(Scene.Item);
+				Scene.Item->AddInstanceComponent(ExtraBody);
+				ExtraBody->SetStaticMesh(Scene.Body->GetStaticMesh());
+				ExtraBody->RegisterComponent();
+				auto Reset = [&]()
+				{
+					Scene.Body->SetSimulatePhysics(bSimulation);
+					Scene.Body->SetEnableGravity(bGravity);
+					ExtraBody->SetSimulatePhysics(!bSimulation);
+					ExtraBody->SetEnableGravity(!bGravity);
+				};
+				auto Check = [&]()
+				{
+					TestEqual(TEXT("Original simulation restored"), Scene.Body->IsSimulatingPhysics(), bSimulation);
+					TestEqual(TEXT("Original gravity restored"), Scene.Body->IsGravityEnabled(), bGravity);
+					TestEqual(TEXT("Child simulation restored independently"), ExtraBody->IsSimulatingPhysics(), !bSimulation);
+					TestEqual(TEXT("Child gravity restored independently"), ExtraBody->IsGravityEnabled(), !bGravity);
+				};
+				Reset();
+				Scene.Point->Attach(Hand, bInstant);
+				Scene.Item->Tick(3.f);
+				TestTrue(TEXT("Real primary hand weld succeeds"), Hand->IsWeldedTo(Scene.Point));
+				SecondPoint->Attach(Second, true);
+				TestTrue(TEXT("Real secondary hand weld succeeds"), Second->IsWeldedTo(SecondPoint));
+				Scene.Point->Detach();
+				TestTrue(TEXT("Remaining hand retains simulation"), Scene.Body->IsSimulatingPhysics());
+				TestFalse(TEXT("Remaining hand retains disabled gravity"), Scene.Body->IsGravityEnabled());
+				SecondPoint->Detach();
+				Check();
+				Reset();
+				Scene.Point->Attach(Inventory, bInstant);
+				Scene.Item->Tick(3.f);
+				TestTrue(TEXT("Inventory weld succeeds"), Inventory->IsWeldedTo(Scene.Point));
+				TestFalse(TEXT("Inventory suspends simulation"), Scene.Body->IsSimulatingPhysics());
+				Scene.Point->Detach();
+				Check();
+				Reset();
+				Scene.Point->Attach(Hand);
+				Scene.Item->Tick(0.5f);
+				Scene.Point->Detach();
+				Check();
+				Reset();
+				Inventory->SetSocketName(TEXT("MissingSocket"));
+				Scene.Point->Attach(Inventory, bInstant);
+				Scene.Item->Tick(3.f);
+				TestFalse(TEXT("Invalid socket rejects weld"), Scene.Item->IsAttached());
+				Check();
+				Reset();
+				Hand->OnWeld = [&]() { Scene.Point->Detach(); };
+				Scene.Point->Attach(Hand, bInstant);
+				Scene.Item->Tick(3.f);
+				TestFalse(TEXT("Reentrant cancellation leaves no physical binding"), Hand->IsWeldedTo(Scene.Point));
+				Check();
+			}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAttachmentStateTest, "VRShooter.Interaction.Attachment.State",
@@ -228,6 +306,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHandWeldTest, "VRShooter.Interaction.Attachmen
 bool FHandWeldTest::RunTest(const FString& Parameters)
 {
 	FAttachmentWorld Scene;
+	UCapsuleComponent* Capsule = NewObject<UCapsuleComponent>(Scene.Player);
+	Scene.Player->AddInstanceComponent(Capsule);
+	Capsule->SetupAttachment(Scene.Player->GetRootComponent());
+	Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Capsule->SetCollisionResponseToAllChannels(ECR_Block);
+	Capsule->RegisterComponent();
 	UStaticMeshComponent* PhysicalHand;
 	UHandSlot* Hand = Scene.AddHand(PhysicalHand);
 	Scene.Body->SetSimulatePhysics(true);
@@ -243,13 +327,36 @@ bool FHandWeldTest::RunTest(const FString& Parameters)
 
 	TArray<UPhysicsConstraintComponent*> Constraints;
 	Scene.Player->GetComponents(Constraints);
-	if (!TestEqual(TEXT("The prepared constraint is reused"), Constraints.Num(), 1))
+	if (!TestEqual(TEXT("Hand prepares a weld and a collision constraint"), Constraints.Num(), 2))
 		return false;
-	UPhysicsConstraintComponent* Constraint = Constraints[0];
+	UPhysicsConstraintComponent* Constraint = nullptr;
+	UPhysicsConstraintComponent* CollisionConstraint = nullptr;
 	UPrimitiveComponent* FirstBody;
 	UPrimitiveComponent* SecondBody;
 	FName FirstBone;
 	FName SecondBone;
+	for (UPhysicsConstraintComponent* Candidate : Constraints)
+	{
+		Candidate->GetConstrainedComponents(FirstBody, FirstBone, SecondBody, SecondBone);
+		if (FirstBody == PhysicalHand)
+			Constraint = Candidate;
+		if (FirstBody == Capsule)
+			CollisionConstraint = Candidate;
+	}
+	if (!TestNotNull(TEXT("Hand joint exists"), Constraint)
+		|| !TestNotNull(TEXT("Capsule collision joint exists"), CollisionConstraint))
+		return false;
+	CollisionConstraint->GetConstrainedComponents(FirstBody, FirstBone, SecondBody, SecondBone);
+	TestTrue(TEXT("Capsule joint connects the held item"), SecondBody == Scene.Body);
+	TestTrue(TEXT("Capsule joint is attached under the physical hand"), CollisionConstraint->GetAttachParent() == PhysicalHand);
+	TestTrue(TEXT("Capsule collision joint is active"), CollisionConstraint->ConstraintInstance.IsValidConstraintInstance());
+	TestTrue(TEXT("Collision between capsule and held item is disabled"), CollisionConstraint->ConstraintInstance.IsCollisionDisabled());
+	TestEqual(TEXT("Capsule joint leaves X free"), CollisionConstraint->ConstraintInstance.GetLinearXMotion(), LCM_Free);
+	TestEqual(TEXT("Capsule joint leaves Y free"), CollisionConstraint->ConstraintInstance.GetLinearYMotion(), LCM_Free);
+	TestEqual(TEXT("Capsule joint leaves Z free"), CollisionConstraint->ConstraintInstance.GetLinearZMotion(), LCM_Free);
+	TestEqual(TEXT("Capsule joint leaves swing one free"), CollisionConstraint->ConstraintInstance.GetAngularSwing1Motion(), ACM_Free);
+	TestEqual(TEXT("Capsule joint leaves swing two free"), CollisionConstraint->ConstraintInstance.GetAngularSwing2Motion(), ACM_Free);
+	TestEqual(TEXT("Capsule joint leaves twist free"), CollisionConstraint->ConstraintInstance.GetAngularTwistMotion(), ACM_Free);
 	Constraint->GetConstrainedComponents(FirstBody, FirstBone, SecondBody, SecondBone);
 	TestTrue(TEXT("Constraint endpoint one is the physical hand"), FirstBody == PhysicalHand);
 	TestTrue(TEXT("Constraint endpoint two is the item root body"), SecondBody == Scene.Body);
@@ -296,12 +403,17 @@ bool FHandWeldTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Gravity returns after release"), Scene.Body->IsGravityEnabled());
 	TestTrue(TEXT("The actual hand binding is free after release"), Hand->IsHandFree());
 	TestFalse(TEXT("The constraint is terminated after release"), Constraint->ConstraintInstance.IsValidConstraintInstance());
+	TestFalse(TEXT("Release terminates the capsule collision joint"), CollisionConstraint->ConstraintInstance.IsValidConstraintInstance());
+	CollisionConstraint->GetConstrainedComponents(FirstBody, FirstBone, SecondBody, SecondBone);
+	TestNull(TEXT("Release clears the capsule joint item endpoint"), SecondBody);
 	Constraint->GetConstrainedComponents(FirstBody, FirstBone, SecondBody, SecondBone);
 	TestNull(TEXT("Release clears the second endpoint without attaching to the world"), SecondBody);
 	Scene.Point->Attach(Hand);
 	Scene.Item->Tick(3.f);
 	TestTrue(TEXT("The same prepared constraint supports another grab"), Hand->IsWeldedTo(Scene.Point));
+	TestTrue(TEXT("Another grab recreates capsule collision filtering"), CollisionConstraint->ConstraintInstance.IsValidConstraintInstance());
 	Hand->DestroyComponent();
+	TestFalse(TEXT("Destroying the hand destroys its capsule constraint"), IsValid(CollisionConstraint));
 	TestTrue(TEXT("Destroying the hand immediately restores gravity"), Scene.Body->IsGravityEnabled());
 	Scene.Item->Tick(0.f);
 	TestFalse(TEXT("The actor clears a destroyed hand binding"), Scene.Item->IsAttached());

@@ -17,6 +17,14 @@ UInteractionPoint::UInteractionPoint()
 	SetIsReplicatedByDefault(true);
 }
 
+FText UInteractionPoint::GetInteractionDisplayName() const
+{
+	if (!InteractionDisplayName.IsEmpty())
+		return InteractionDisplayName;
+	const AInteractableActor* Actor = Cast<AInteractableActor>(GetOwner());
+	return Actor ? Actor->InteractionDisplayName : FText::GetEmpty();
+}
+
 IInteractable* UInteractionPoint::GetInteractableOwner()
 {
 	return Cast<IInteractable>(GetOwner());

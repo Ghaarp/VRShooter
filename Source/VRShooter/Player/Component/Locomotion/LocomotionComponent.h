@@ -30,6 +30,7 @@ public:
 	// Sets default values for this component's properties
 	ULocomotionComponent();
 	void BindPlayerLocomotionInput(UInputComponent* PlayerInputComponent);
+	void RefreshAnimationState();
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	// ILocomotionAnimCompatible interface ----------------------------------------
@@ -91,6 +92,9 @@ protected:
 	UCapsuleComponent* CapsuleComponent;
 
 	// Animation ----------------------------------------
+	// Prepared on the game thread before pose evaluation for animation workers.
+	float CameraPitchValue = 0.f;
+
 	UPROPERTY()
 	float ForwardSpeedValue = 0.f;
 

@@ -2,6 +2,10 @@
 
 
 #include "Player/Component/VRController/VRControllerComponent.h"
+#include "Player/Component/Locomotion/RoomScaleMovementComponent.h"
+#include "Player/Component/VRController/VRViewCameraComponent.h"
+#include "Player/Component/VRController/XRRecenterComponent.h"
+#include "GameFramework/Pawn.h"
 
 #include <ntstatus.h>
 
@@ -80,19 +84,22 @@ void UVRControllerComponent::BeginPlay()
 
 	CameraComponent = Owner->GetCamera();
 	VROrigin = Owner->GetVROrigin();
+	if (auto* ViewCamera = Cast<UVRViewCameraComponent>(CameraComponent))
+		ViewCamera->SetFollowVRViewPoint(!bDisableVRCamera);
 	MotionControllerRoot = Owner->GetMotionControllerRoot();
+	if (auto* Movement = GetOwner()->FindComponentByClass<URoomScaleMovementComponent>())
+		Movement->SetRoomScaleEnabled(!bDisableVRCamera);
 }
 
 // Called every frame
 void UVRControllerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	if (!bDisableVRCamera)
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	if (Pawn && Pawn->IsLocallyControlled() && !bDisableVRCamera)
 	{
 		UpdateHMDTransform();
-		SetActorLocationWithHMDOffset(DeltaTime);
-		SetActorRotationWithHMDRotation(DeltaTime);
-		UpdateVRCamera();
+		UpdateTrackingOriginHeight();
 	}
 	
 }
@@ -183,19 +190,9 @@ void UVRControllerComponent::Turn(const FInputActionValue& Value)
 
 	if (!bDisableVRCamera)
 	{
-		FVector2D TurnVector = Value.Get<FVector2D>();
-		float DeltaAxis = TurnVector.X;
-
-		FVector RootLocation = VROrigin->GetComponentLocation();
-		FVector CameraLocation = CameraComponent->GetComponentLocation();
-
-		FVector DeltaLocation = RootLocation - CameraLocation;
-		float DeltaTime = GetWorld()->GetDeltaSeconds();
-		float Angle = RotationRate * DeltaAxis * DeltaTime;
-		FVector NewOriginLoc = DeltaLocation.RotateAngleAxis(Angle, FVector(0, 0, 1));
-		VROrigin->SetWorldLocation(CameraLocation + NewOriginLoc);
-		VROrigin->AddRelativeRotation(FRotator(0, Angle, 0));
-		TurnActorOnly(Angle);
+		const float Angle = RotationRate * Value.Get<FVector2D>().X * GetWorld()->GetDeltaSeconds();
+		if (auto* Movement = GetOwner()->FindComponentByClass<URoomScaleMovementComponent>())
+			Movement->AddRoomScaleTurn(Angle);
 	}
 	else
 	{
@@ -212,21 +209,6 @@ void UVRControllerComponent::Turn(const FInputActionValue& Value)
 	
 }
 
-void UVRControllerComponent::TurnActorOnly(float Amount)
-{
-	FTransform Transform = VROrigin->GetComponentTransform();
-	Owner->AddActorWorldRotation(FRotator(0, Amount, 0));
-	VROrigin->SetWorldTransform(Transform);
-}
-
-void UVRControllerComponent::MoveActorOnly(FVector Offset)
-{
-	FTransform SavedOriginTransform = VROrigin->GetComponentTransform();
-	Owner->AddActorWorldOffset(Offset);
-	VROrigin->SetWorldTransform(SavedOriginTransform);
-}
-
-// Tick functions -------------------------------------------------------------------------------------------------------------
 void UVRControllerComponent::UpdateHMDTransform()
 {
 	if (!Owner.GetInterface())
@@ -237,42 +219,11 @@ void UVRControllerComponent::UpdateHMDTransform()
 	//UE_LOG(LogTemp, Warning, TEXT("HMD Transform: Location = %s, Rotation = %s"), *HMDTransform.GetLocation().ToString(), *HMDTransform.GetRotation().Rotator().ToString());
 }
 
-void UVRControllerComponent::SetActorLocationWithHMDOffset(float DeltaTime)
+void UVRControllerComponent::UpdateTrackingOriginHeight()
 {
-	if (!VROrigin || !Owner.GetInterface())
-		return;
-
-	FVRControllableSocketTransform ViewPointTransform = Owner->GetVRViewPoint();
-	if (!ViewPointTransform.bIsSocketFound)
-		return;
-
-	FVector HMDWorldLocation = VROrigin->GetComponentTransform().TransformPosition(HMDTransform.GetLocation());
-	FVector ViewPointLocation = ViewPointTransform.SocketTransform.GetLocation();
-	FVector HMDOffset = HMDWorldLocation - ViewPointLocation;
-
-	HMDOffset.Z = 0;
-
-	MoveActorOnly(HMDOffset);
-}
-
-void UVRControllerComponent::SetActorRotationWithHMDRotation(float DeltaTime)
-{
-	if (!CameraComponent || !Owner.GetInterface())
-		return;
-
-	FTransform ActorTransform = Owner->GetActorTransform();
-	FQuat CameraRotation = CameraComponent->GetComponentQuat();
-	FQuat TransformedCameraRotation = FTransform().TransformRotation(CameraRotation);
-
-	FRotator CameraRotator = TransformedCameraRotation.Rotator();
-	FRotator ActorRotator = ActorTransform.GetRotation().Rotator();
-
-	float Angle = CameraRotator.Yaw - ActorRotator.Yaw;
-	TurnActorOnly(Angle);
-}
-
-void UVRControllerComponent::UpdateVRCamera()
-{
+	if (const UXRRecenterComponent* Recenter = GetOwner()->FindComponentByClass<UXRRecenterComponent>())
+		if (Recenter->IsWaitingForTracking())
+			return;
 	if (!VROrigin || !CameraComponent)
 		return;
 	

@@ -55,6 +55,9 @@ public:
 	virtual InteractionActorType GetInteractionActorType() const override { return ActorType; }
 	virtual IInteractableSlavePoint* GetMainPoint() override;
 	bool IsFreeForInteraction() const;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	FText InteractionDisplayName = NSLOCTEXT("Interaction", "Item", "Item");
 	virtual void Attach(IInteractableSlavePoint* SlavePoint, IInteractableMasterPoint* MasterPoint, bool bIsInstant = false) override;
 	virtual void Detach(IInteractableSlavePoint* SlavePoint) override;
 	virtual void DetachAll() override;
@@ -72,7 +75,15 @@ private:
 	void UpdateAttachmentTransform(float Alpha);
 	void CompleteAttachment(bool bTeleportMasterToSlave = false);
 	void ResetAttachment(bool bRestorePhysics);
-	void SetGravityEnabled(bool bEnabled);
+	void UpdateAttachmentPhysics(bool bRestoreOriginal);
+	void CapturePhysicsState();
+	struct FOriginalPhysicsState
+	{
+		TWeakObjectPtr<UPrimitiveComponent> Body;
+		bool bSimulating;
+		bool bGravity;
+	};
+	TArray<FOriginalPhysicsState> OriginalPhysicsState;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", Units = "s"))
 	float AttachmentTime = 3.f;

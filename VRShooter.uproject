@@ -5,6 +5,11 @@
 	"Description": "",
 	"Modules": [
 		{
+			"Name": "VRShooterXRBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit"
+		},
+		{
 			"Name": "VRShooter",
 			"Type": "Runtime",
 			"LoadingPhase": "Default",

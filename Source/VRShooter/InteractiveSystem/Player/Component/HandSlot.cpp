@@ -5,6 +5,7 @@
 
 #include "Components/PrimitiveComponent.h"
 #include "Components/MeshComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "InteractiveSystem/Actor/InteractableActor.h"
 #include "InteractiveSystem/Component/InteractionPoint.h"
@@ -38,8 +39,33 @@ void UHandSlot::Grab()
 		|| !IsValid(Candidate->GetPointOwner())
 		|| !CanInteractWith(Candidate))
 		return;
+	if (UInventorySlot* Slot = Cast<UInventorySlot>(Candidate->_getUObject()))
+	{
+		UInteractionPoint* Stored = Cast<UInteractionPoint>(Slot->GetRequestedInteractionPoint()->_getUObject());
+		ServerGrabFromInventory(Slot, Slot->GetStoredMainPoint(), GetRequestRevision(),
+			Slot->GetRequestRevision(), Stored->GetAttachmentState().AttachmentId);
+		return;
+	}
 	if (UInteractionPoint* Point = Cast<UInteractionPoint>(Candidate->_getUObject()))
 		RequestInteraction(Point);
+}
+
+void UHandSlot::ServerGrabFromInventory_Implementation(UInventorySlot* Source, UInteractionPoint* MainPoint,
+	uint32 ExpectedRevision, uint32 SourceRevision, uint32 SourceAttachmentId)
+{
+	if (!IsValid(Source)
+		|| ExpectedRevision != GetRequestRevision()
+		|| SourceRevision != Source->GetRequestRevision()
+		|| !IsHandFree()
+		|| !Source->IsInteractionEnabled()
+		|| !CanInteractWith(Source)
+		|| Source->GetStoredMainPoint() != MainPoint)
+		return;
+	UInteractionPoint* Stored = Cast<UInteractionPoint>(Source->GetRequestedInteractionPoint()->_getUObject());
+	if (Stored->GetAttachmentState().AttachmentId != SourceAttachmentId)
+		return;
+	Source->ForceRelease();
+	SetRequestedInteractionPoint(TScriptInterface<IInteractableSlavePoint>(MainPoint), true);
 }
 
 void UHandSlot::Release()
@@ -77,7 +103,9 @@ bool UHandSlot::IsWeldValid() const
 		&& IsValid(PhysicalHand) 
 		&& PhysicalHand->IsSimulatingPhysics() 
 		&& IsValid(WeldConstraint) 
-		&& WeldConstraint->ConstraintInstance.IsValidConstraintInstance();
+		&& WeldConstraint->ConstraintInstance.IsValidConstraintInstance()
+		&& (!GetOwner()->FindComponentByClass<UCapsuleComponent>()
+			|| (IsValid(DisableCapsuleCollision) && DisableCapsuleCollision->ConstraintInstance.IsValidConstraintInstance()));
 }
 
 bool UHandSlot::CreateWeld(IInteractableSlavePoint* SlavePoint, USceneComponent* Root, bool bTeleportToSlave)
@@ -111,7 +139,12 @@ bool UHandSlot::CreateWeld(IInteractableSlavePoint* SlavePoint, USceneComponent*
 	WeldConstraint->SetWorldLocationAndRotation(WeldTransform.GetLocation(), WeldTransform.GetRotation());
 	WeldConstraint->SetDisableCollision(true);
 	WeldConstraint->SetConstrainedComponents(PhysicalHand, NAME_None, Body, NAME_None);
-	if (!Body->IsSimulatingPhysics() || !WeldConstraint->ConstraintInstance.IsValidConstraintInstance())
+	UCapsuleComponent* Capsule = GetOwner()->FindComponentByClass<UCapsuleComponent>();
+	if (Capsule && IsValid(DisableCapsuleCollision))
+		DisableCapsuleCollision->SetConstrainedComponents(Capsule, NAME_None, Body, NAME_None);
+	if (!Body->IsSimulatingPhysics()
+		|| !WeldConstraint->ConstraintInstance.IsValidConstraintInstance()
+		|| (Capsule && (!IsValid(DisableCapsuleCollision) || !DisableCapsuleCollision->ConstraintInstance.IsValidConstraintInstance())))
 	{
 		ReleaseConstraint();
 		Body->SetSimulatePhysics(bWasSimulating);
@@ -135,6 +168,12 @@ void UHandSlot::DestroyWeld()
 
 void UHandSlot::ReleaseConstraint()
 {
+	if (IsValid(DisableCapsuleCollision))
+	{
+		DisableCapsuleCollision->BreakConstraint();
+		DisableCapsuleCollision->ComponentName2.ComponentName = NAME_None;
+		DisableCapsuleCollision->OverrideComponent2.Reset();
+	}
 	if (IsValid(WeldConstraint))
 	{
 		WeldConstraint->BreakConstraint();
@@ -165,7 +204,7 @@ bool UHandSlot::GetInteractionRay(FVector& Start, FVector& End)
 	const AVRPlayer* Player = Cast<AVRPlayer>(GetOwner());
 	const FRotator AngleOffset = Player ? Player->GetHandRayAngleOffset(GetInteractablePointHand()) : FRotator::ZeroRotator;
 	Start = PhysicalHand->GetComponentLocation();
-	End = Start + PhysicalHand->GetComponentQuat().RotateVector(AngleOffset.Vector()) * 150.f;
+	End = Start + PhysicalHand->GetComponentQuat().RotateVector(AngleOffset.RotateVector(-FVector::UpVector)) * 150.f;
 	return true;
 }
 
@@ -231,6 +270,7 @@ FInteractionPointResult UHandSlot::FindPointByRaycast()
 				{
 					IInteractableSlavePoint* MainPoint = Actor->GetMainPoint();
 					if (MainPoint && MainPoint->IsInteractionEnabled()
+						&& MainPoint->GetInteractionRange() > 0.f
 						&& MainPoint->GetPointOwner() == Actor
 						&& MainPoint->GetInteractablePointType() == GetInteractablePointType()
 						&& MainPoint->SupportsHand(GetInteractablePointHand()))
@@ -243,8 +283,23 @@ FInteractionPointResult UHandSlot::FindPointByRaycast()
 
 bool UHandSlot::CanInteractWith(IInteractablePoint* Point)
 {
+	if (Point->GetInteractionRange() <= 0.f)
+		return false;
 	if (IsHandFree())
 	{
+		if (UInventorySlot* Slot = Cast<UInventorySlot>(Point->_getUObject()))
+		{
+			UInteractionPoint* Main = Slot->GetStoredMainPoint();
+			return Slot->GetOwner() == GetOwner()
+				&& Slot->GetWorld() == GetWorld()
+				&& Main
+				&& Main->GetInteractionRange() > 0.f
+				&& Main->GetInteractablePointType() == InteractablePointType::Hand
+				&& Main->SupportsHand(GetInteractablePointHand());
+		}
+		if (const UInteractionPoint* NativePoint = Cast<UInteractionPoint>(Point->_getUObject()))
+			if (!CanReserveInteractionPoint(NativePoint))
+				return false;
 		IInteractableSlavePoint* SlavePoint = Cast<IInteractableSlavePoint>(Point->_getUObject());
 		return SlavePoint && SlavePoint->GetInteractablePointType() == InteractablePointType::Hand &&
 			SlavePoint->SupportsHand(GetInteractablePointHand()) && !IsHeldByOtherHand(SlavePoint);
@@ -334,12 +389,29 @@ void UHandSlot::BeginPlay()
 	// Future welding must supply component 2 before initializing the constraint.
 	WeldConstraint->ComponentName1.ComponentName = PhysicalHand->GetFName();
 	WeldConstraint->OverrideComponent1 = PhysicalHand;
+
+	const FName CollisionConstraintName = MakeUniqueObjectName(Owner, UPhysicsConstraintComponent::StaticClass(),
+		FName(*(GetName() + TEXT("_DisableCapsuleCollision"))));
+	DisableCapsuleCollision = NewObject<UPhysicsConstraintComponent>(Owner, CollisionConstraintName, RF_Transient);
+	DisableCapsuleCollision->SetupAttachment(PhysicalHand);
+	// This joint only filters the capsule/item pair; it must not drive or limit the item.
+	DisableCapsuleCollision->SetLinearXLimit(ELinearConstraintMotion::LCM_Free, 0.f);
+	DisableCapsuleCollision->SetLinearYLimit(ELinearConstraintMotion::LCM_Free, 0.f);
+	DisableCapsuleCollision->SetLinearZLimit(ELinearConstraintMotion::LCM_Free, 0.f);
+	DisableCapsuleCollision->SetAngularSwing1Limit(EAngularConstraintMotion::ACM_Free, 0.f);
+	DisableCapsuleCollision->SetAngularSwing2Limit(EAngularConstraintMotion::ACM_Free, 0.f);
+	DisableCapsuleCollision->SetAngularTwistLimit(EAngularConstraintMotion::ACM_Free, 0.f);
+	DisableCapsuleCollision->SetDisableCollision(true);
+	DisableCapsuleCollision->RegisterComponent();
 }
 
 void UHandSlot::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	SetGrabManager(nullptr);
 	Super::EndPlay(EndPlayReason);
+	if (IsValid(DisableCapsuleCollision))
+		DisableCapsuleCollision->DestroyComponent();
+	DisableCapsuleCollision = nullptr;
 	if (IsValid(WeldConstraint))
 	{
 		WeldConstraint->DestroyComponent();

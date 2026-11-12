@@ -2,8 +2,12 @@
 
 #include "Player/Component/IK/LowerBodyIKHelper.h"
 #include "Player/Component/IK/Interface/LowerIKCompatible.h"
+#include "Player/Component/Locomotion/Interface/LocomotionCompatible.h"
 #include "Animation/UE5Skeleton/ControlRig/FullBodyCRStructs.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Async/Async.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 
 // Sets default values for this component's properties
 ULowerBodyIKHelper::ULowerBodyIKHelper()
@@ -72,10 +76,8 @@ FLowerIKData ULowerBodyIKHelper::CalculateLowerBodyIK(FIKParams& Params)
 	if (!Owner.GetInterface() || !ActorOwner)
 		return Result;
 
-	FTransform MeshTransform = ActorOwner->GetTransform();
+	const FTransform MeshTransform = Params.MeshTransform;
 	FVector MeshLocation = MeshTransform.GetLocation();
-	MeshLocation.Z -= 96.f;
-	MeshTransform.SetLocation(MeshLocation);
 
 	Pelvis.SourceTransformLocal = Params.PelvisLocal;
 	SetupSocket(Left, Params.LeftFoot);
@@ -152,26 +154,30 @@ bool ULowerBodyIKHelper::TryMakeTrace(FVector MeshLocation, FIKData& IKData, flo
 
 	FCollisionResponseParams ResponseParams;
 
+	const bool bHit = GetWorld()->SweepSingleByChannel(Result, TraceStart, TraceEnd, BoxRotation, ECollisionChannel::ECC_Visibility, Shape, Params, ResponseParams);
 	if (bDrawDebug)
 	{
-		DrawDebugBox(GetWorld(), TraceStart, FVector(2, 2, 2), FColor::Green, false, 0.05f, -100, 0.1f);
-		DrawDebugBox(GetWorld(), TraceEnd, FVector(2, 2, 2), FColor::Green, false, 0.05f, -100, 0.1f);
-		DrawDebugBox(GetWorld(), MeshLocation, FVector(2, 2, 2), FColor::Blue, false, 0.05f, -100, 0.1f);
+		// Control Rig evaluates on animation workers; line batch buffers belong to the game thread.
+		auto DrawTrace = [World = TWeakObjectPtr<UWorld>(GetWorld()), TraceStart, TraceEnd, MeshLocation,
+			bHit, ImpactPoint = Result.ImpactPoint]()
+		{
+			if (UWorld* DebugWorld = World.Get(); DebugWorld && !DebugWorld->bIsTearingDown)
+			{
+				DrawDebugBox(DebugWorld, TraceStart, FVector(2, 2, 2), FColor::Green, false, 0.05f, -100, 0.1f);
+				DrawDebugBox(DebugWorld, TraceEnd, FVector(2, 2, 2), FColor::Green, false, 0.05f, -100, 0.1f);
+				DrawDebugBox(DebugWorld, MeshLocation, FVector(2, 2, 2), FColor::Blue, false, 0.05f, -100, 0.1f);
+				if (bHit)
+					DrawDebugBox(DebugWorld, ImpactPoint, FVector(1, 1, 1), FColor::Orange, false, 0.05f, -100, 0.1f);
+			}
+		};
+		if (IsInGameThread())
+			DrawTrace();
+		else
+			AsyncTask(ENamedThreads::GameThread, MoveTemp(DrawTrace));
 	}
-
-	if (GetWorld()->SweepSingleByChannel(Result, TraceStart, TraceEnd, BoxRotation, ECollisionChannel::ECC_Visibility, Shape, Params, ResponseParams))
+	if (bHit)
 	{
 		IKData.TracedLocation = Result.ImpactPoint;
-
-		if (bDrawDebug)
-			DrawDebugBox(GetWorld(),
-				IKData.TracedLocation,
-				FVector(1, 1, 1),
-				FColor::Orange,
-				false, 0.05f,
-				-100,
-				0.1f);
-
 		return true;
 	}
 
@@ -203,7 +209,8 @@ void ULowerBodyIKHelper::CalculateTargetsTraced(FVector MeshLocation, float Body
 	float LeftTracedOffset = Left.Offset;
 	float RightTracedOffset = Right.Offset;
 
-	FVector Velocity = ActorOwner->GetVelocity();
+	const ILocomotionCompatible* Locomotion = Cast<ILocomotionCompatible>(ActorOwner);
+	const FVector Velocity = Locomotion ? Locomotion->GetLocomotionVelocity() : ActorOwner->GetVelocity();
 	if (Velocity.IsNearlyZero())
 		BodyBalance = RightTracedOffset < LeftTracedOffset ? 1.f : -1.f;
 

@@ -16,5 +16,7 @@ class VRSHOOTER_API UInventorySlot : public UItemSlot
 
 public:
 	UInventorySlot();
+	UInteractionPoint* GetStoredMainPoint() const;
+	virtual FText GetInteractionDisplayName() const override;
 	virtual bool IsInventorySlot() const override { return true; }
 };

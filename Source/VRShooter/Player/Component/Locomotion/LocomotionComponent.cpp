@@ -7,9 +7,14 @@
 #include "InputActionValue.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Player/Component/Locomotion/RoomScaleMovementComponent.h"
 #include "Player/Component/Locomotion/Interface/LocomotionCompatible.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Character.h"
 #include "DrawDebugHelpers.h"
+#include "Player/VRPlayer.h"
+#include "Player/Component/VRController/VRPoseReplicatorComponent.h"
 
 // Sets default values for this component's properties
 ULocomotionComponent::ULocomotionComponent()
@@ -32,6 +37,24 @@ void ULocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	
+	RefreshAnimationState();
+}
+
+void ULocomotionComponent::RefreshAnimationState()
+{
+	InitOwner();
+	AVRPlayer* VRPlayer = Cast<AVRPlayer>(GetOwner());
+	if (VRPlayer)
+		VRPlayer->GetVRPoseReplicator()->PrepareForAnimation();
+	CameraPitchValue = CameraComponent ? CameraComponent->GetComponentRotation().Pitch : DefaultCameraPitch;
+	if (const AVRPlayer* Player = VRPlayer)
+		if (Player->GetVROrigin() && (Player->IsLocallyControlled() || Player->GetVRPoseReplicator()->HasRemotePose()))
+		{
+			FTransform Tracking;
+			// Hold the last valid orientation when tracking is lost.
+			Player->SampleHMDTransform(Tracking);
+			CameraPitchValue = Player->GetVROrigin()->GetComponentTransform().TransformRotation(Tracking.GetRotation()).Rotator().Pitch;
+		}
 	UpdateHeight();
 	UpdateSpeedComponents();
 	UpdateLandingPredictionValue();
@@ -103,15 +126,22 @@ void ULocomotionComponent::UpdateSpeedComponents()
 
 	float MaxSpeed = OwnerMovement->GetMaxSpeed();
 
-	FVector CameraVectorNormalized = CameraComponent->GetForwardVector();
+	const bool bRoomScale = Cast<URoomScaleMovementComponent>(OwnerMovement) != nullptr;
+	FQuat BodyRotation = OwnerMovement->UpdatedComponent->GetComponentQuat();
+	if (bRoomScale)
+		if (const ACharacter* Character = OwnerMovement->GetCharacterOwner())
+			if (const USkeletalMeshComponent* Mesh = Character->GetMesh())
+				// Remove the model import rotation, preserving the network-smoothed body heading.
+				BodyRotation = Mesh->GetComponentQuat() * Character->GetBaseRotationOffset().Inverse();
+	FVector CameraVectorNormalized = bRoomScale ? BodyRotation.GetForwardVector() : CameraComponent->GetForwardVector();
 	CameraVectorNormalized.Z = 0;
 	CameraVectorNormalized = CameraVectorNormalized.GetSafeNormal();
 
-	FVector CameraRightVectorNormalized = CameraComponent->GetRightVector();
+	FVector CameraRightVectorNormalized = bRoomScale ? BodyRotation.GetRightVector() : CameraComponent->GetRightVector();
 	CameraRightVectorNormalized.Z = 0;
 	CameraRightVectorNormalized = CameraRightVectorNormalized.GetSafeNormal();
 
-	FVector Velocity = Owner->GetVelocity();
+	FVector Velocity = Owner->GetLocomotionVelocity();
 	VerticalSpeedValue = Velocity.Z;
 
 	Velocity.Z = 0;
@@ -120,7 +150,7 @@ void ULocomotionComponent::UpdateSpeedComponents()
 	//Here an alpha-values for future animations
 	ForwardSpeedValue = (float)CameraVectorNormalized.Dot(VelocityNormalized);
 	RightSpeedValue = (float)CameraRightVectorNormalized.Dot(VelocityNormalized);
-	MovementAngleValue = FMath::RadiansToDegrees(acosf(ForwardSpeedValue)) * FMath::Sign(RightSpeedValue) * (-1);
+	MovementAngleValue = FMath::RadiansToDegrees(FMath::Atan2(-RightSpeedValue, ForwardSpeedValue));
 	SpeedValue = Velocity.Size();
 
 }
@@ -259,10 +289,7 @@ float ULocomotionComponent::GetMaxRunningSpeed() const
 
 float ULocomotionComponent::GetCameraPitch() const
 {
-	if (!CameraComponent)
-		return DefaultCameraPitch;
-
-	return CameraComponent ? CameraComponent->GetComponentRotation().Pitch : DefaultCameraPitch;
+	return CameraPitchValue;
 }
 
 float ULocomotionComponent::GetScaleRatio() const

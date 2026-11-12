@@ -46,6 +46,7 @@ public:
 	virtual float GetMaxWalkingSpeed() const PURE_VIRTUAL(ILocomotionCompatible::GetMaxWalkingSpeed, return 0.f;);
 	virtual float GetMaxRunningSpeed() const PURE_VIRTUAL(ILocomotionCompatible::GetMaxRunningSpeed, return 0.f;);
 	virtual FVector GetVelocity() const PURE_VIRTUAL(ILocomotionCompatible::GetVelocity, return FVector::Zero(););
+	virtual FVector GetLocomotionVelocity() const { return GetVelocity(); }
 	virtual FVector GetActorLocation() const PURE_VIRTUAL(ILocomotionCompatible::GetActorLocation, return FVector::Zero(););
 	virtual float GetScaleRatio() const PURE_VIRTUAL(ILocomotionCompatible::GetScaleRatio, return 1.f;);
 	virtual void UpdateWalkRun(bool bIsRunning) const PURE_VIRTUAL(ILocomotionCompatible::UpdateWalkRun, );

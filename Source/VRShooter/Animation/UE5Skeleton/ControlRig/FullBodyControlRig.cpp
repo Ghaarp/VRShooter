@@ -23,8 +23,12 @@ bool UFullBodyControlRig::Execute(const FName& InEventName)
 
 void UFullBodyControlRig::SetDefaultValues()
 {
-	if (ParentSkeletalMeshComponent)
-		return;
+	// Preview compilation can replace the mesh's anim instance while retaining this rig.
+	// Resolve dependencies for every execution instead of retaining the old instance.
+	ParentSkeletalMeshComponent = nullptr;
+	AnimInstance = nullptr;
+	LowerBodyCalculator = nullptr;
+	UpperBodyCalculator = nullptr;
 
 	USceneComponent* Component = OuterSceneComponent.Get();
 	if (!Component)
@@ -35,8 +39,13 @@ void UFullBodyControlRig::SetDefaultValues()
 		bIsInEditor = World->WorldType == EWorldType::EditorPreview;
 
 	ParentSkeletalMeshComponent = Cast<USkeletalMeshComponent>(Component);
+	if (!ParentSkeletalMeshComponent)
+		return;
+
 	AnimInstance = ParentSkeletalMeshComponent->GetAnimInstance();
 	AActor* OwnerActor = Component->GetOwner();
+	if (!OwnerActor)
+		return;
 
 	ILowerBodyIKCalculator* ObjLowerBodyCalculator = OwnerActor->FindComponentByInterface<ILowerBodyIKCalculator>();
 	if (ObjLowerBodyCalculator)

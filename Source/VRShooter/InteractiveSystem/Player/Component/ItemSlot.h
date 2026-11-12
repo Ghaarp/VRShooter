@@ -22,14 +22,20 @@ public:
 
 	// Interaction requests and local attachment state
 	IInteractableSlavePoint* GetRequestedInteractionPoint() const { return RequestedInteractionPoint.GetInterface(); }
-	void SetRequestedInteractionPoint(const TScriptInterface<IInteractableSlavePoint>& InPoint);
+	void SetRequestedInteractionPoint(const TScriptInterface<IInteractableSlavePoint>& InPoint, bool bInstant = false);
 	void RequestInteraction(UInteractionPoint* Point);
+	bool CanReserveInteractionPoint(const UInteractionPoint* Point) const;
 	void ForceRelease();
 	uint32 GetRequestRevision() const { return RequestRevision; }
 	UInteractionPoint* FindCompatiblePoint(AActor* Actor) const;
 	IInteractableSlavePoint* GetAttachedInteractionPoint() const { return AttachedInteractionPoint.GetInterface(); }
 
 	// Point configuration
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	FText InteractionDisplayName;
+
+	virtual FText GetInteractionDisplayName() const override { return InteractionDisplayName; }
+
 	void SetPointType(InteractablePointType InPointType) { PointType = InPointType; }
 	void SetPointHand(InteractablePointHand InPointHand) { PointHand = InPointHand; }
 	void SetInteractionRange(float InRange) { InteractionRange = FMath::Max(InRange, 0.f); }

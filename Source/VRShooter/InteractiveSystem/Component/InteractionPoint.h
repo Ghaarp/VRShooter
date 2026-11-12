@@ -61,6 +61,11 @@ public:
 	void SetInteractionRange(float InRange) { InteractionRange = FMath::Max(InRange, 0.f); }
 	virtual AActor* GetPointOwner() const override { return GetOwner(); }
 	virtual IInteractable* GetInteractableOwner() override;
+	virtual FText GetInteractionDisplayName() const override;
+
+	/** Empty uses the owning interactable actor's name. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	FText InteractionDisplayName;
 	virtual void Attach(IInteractableMasterPoint* MasterPoint, bool bIsInstant = false) override;
 	virtual void Detach() override;
 	virtual bool SupportsHand(InteractablePointHand Hand) const override;

@@ -29,20 +29,35 @@ void UItemSlot::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 	DOREPLIFETIME(UItemSlot, RequestRevision);
 }
 
-void UItemSlot::SetRequestedInteractionPoint(const TScriptInterface<IInteractableSlavePoint>& InPoint)
+bool UItemSlot::CanReserveInteractionPoint(const UInteractionPoint* Point) const
+{
+	if (!IsValid(Point) || !IsValid(Point->GetOwner()))
+		return false;
+	const auto& State = Point->GetAttachmentState();
+	if (IsValid(State.MasterPoint) && (!State.IsWeld || State.MasterPoint->GetOwner() == GetOwner()))
+		return false;
+	TInlineComponentArray<UInteractionPoint*> Points(Point->GetOwner());
+	for (const UInteractionPoint* Other : Points)
+	{
+		const auto& OtherState = Other->GetAttachmentState();
+		if (IsValid(OtherState.MasterPoint) && (!OtherState.IsWeld || IsInventorySlot() || OtherState.MasterPoint->IsInventorySlot()))
+			return false;
+	}
+	return true;
+}
+
+void UItemSlot::SetRequestedInteractionPoint(const TScriptInterface<IInteractableSlavePoint>& InPoint, bool bInstant)
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority() || InPoint.GetObject() == RequestedInteractionPoint.GetObject())
 		return;
 	UInteractionPoint* Point = Cast<UInteractionPoint>(InPoint.GetObject());
 	AInteractableActor* Actor = Point ? Cast<AInteractableActor>(Point->GetOwner()) : nullptr;
-	bool bInstant = false;
 	uint32 OwnershipId = 0;
 	if (InPoint.GetObject() && (!Point || !Actor))
 		return;
 	if (Point)
 	{
-		const auto& State = Point->GetAttachmentState();
-		if (State.MasterPoint && (!State.IsWeld || State.MasterPoint->GetOwner() == GetOwner()))
+		if (!CanReserveInteractionPoint(Point))
 			return;
 		TInlineComponentArray<UInteractionPoint*> Points(Actor);
 		bool bOtherPlayer = false;
@@ -52,11 +67,6 @@ void UItemSlot::SetRequestedInteractionPoint(const TScriptInterface<IInteractabl
 			const auto& OtherState = Other->GetAttachmentState();
 			if (!IsValid(OtherState.MasterPoint))
 				continue;
-			if (!OtherState.IsWeld)
-				return;
-			// Inventory is exclusive. Releases/transfers must clear the source first.
-			if (IsInventorySlot())
-				return;
 			bFromInventory |= OtherState.MasterPoint->IsInventorySlot();
 			if (OtherState.MasterPoint->GetOwner() == GetOwner())
 			{
@@ -276,11 +286,7 @@ void UItemSlot::Unweld(IInteractableSlavePoint* SlavePoint)
 void UItemSlot::DestroyWeld()
 {
 	if (WeldedRoot.IsValid())
-	{
 		WeldedRoot->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-		if (UPrimitiveComponent* RootBody = Cast<UPrimitiveComponent>(WeldedRoot.Get()))
-			RootBody->SetSimulatePhysics(true);
-	}
 	for (const TWeakObjectPtr<UPrimitiveComponent>& Body : SuspendedBodies)
 		if (Body.IsValid())
 			Body->SetSimulatePhysics(true);

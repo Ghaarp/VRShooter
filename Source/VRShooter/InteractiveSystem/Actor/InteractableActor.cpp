@@ -113,6 +113,7 @@ void AInteractableActor::Attach(IInteractableSlavePoint* SlavePoint, IInteractab
 	{
 		if (Point->GetConnectionState().bIsConnected)
 			return;
+		CapturePhysicsState();
 		AttachmentSession = FAttachmentSession(SlavePoint, MasterPoint, GetActorTransform());
 		++AttachmentSerial;
 		// The first local binding (including late join) moves the item. Further
@@ -127,8 +128,9 @@ void AInteractableActor::Attach(IInteractableSlavePoint* SlavePoint, IInteractab
 	// Release the previous joint before moving the actor toward another hand.
 	DetachAll();
 	++AttachmentSerial;
+	CapturePhysicsState();
 	AttachmentSession = FAttachmentSession(SlavePoint, MasterPoint, GetActorTransform());
-	SetGravityEnabled(false);
+	UpdateAttachmentPhysics(false);
 
 	TInlineComponentArray<UPrimitiveComponent*> Primitives(this);
 	for (UPrimitiveComponent* Primitive : Primitives)
@@ -185,6 +187,7 @@ void AInteractableActor::CompleteAttachment(bool bTeleportMasterToSlave)
 	const TWeakInterfacePtr<IInteractableSlavePoint> WeakSlave = SlavePoint;
 	const TWeakInterfacePtr<IInteractableMasterPoint> WeakMaster = MasterPoint;
 	const uint64 Serial = AttachmentSerial;
+	const auto PhysicsBeforeWeld = OriginalPhysicsState;
 	const bool bWelded = MasterPoint->Weld(SlavePoint, bTeleportMasterToSlave);
 	if (Serial != AttachmentSerial || !WeakSlave.IsValid() || !WeakMaster.IsValid())
 	{
@@ -192,7 +195,10 @@ void AInteractableActor::CompleteAttachment(bool bTeleportMasterToSlave)
 			WeakMaster->Unweld(WeakSlave.Get());
 		if (Serial == AttachmentSerial)
 			ResetAttachment(true);
-		SetGravityEnabled(!IsAttached() && !IsAttaching());
+		// A callback may restore/clear the snapshot before Weld finishes changing physics.
+		if (!IsAttached() && !IsAttaching() && OriginalPhysicsState.IsEmpty())
+			OriginalPhysicsState = PhysicsBeforeWeld;
+		UpdateAttachmentPhysics(!IsAttached() && !IsAttaching());
 		return;
 	}
 	if (bWelded)
@@ -206,7 +212,7 @@ void AInteractableActor::CompleteAttachment(bool bTeleportMasterToSlave)
 		}
 		else if (UItemSlot* Slot = Cast<UItemSlot>(MasterPoint->_getUObject()))
 			Slot->SuspendedBodies.Append(AttachmentSession.SimulatedComponents);
-		SetGravityEnabled(false);
+		UpdateAttachmentPhysics(false);
 	}
 	ResetAttachment(!bWelded);
 }
@@ -219,7 +225,7 @@ void AInteractableActor::Detach(IInteractableSlavePoint* SlavePoint)
 		if (UInteractionPoint* Point = Cast<UInteractionPoint>(SlavePoint->_getUObject()))
 			if (Point->GetOwner() == this)
 				Point->ReleaseConnection();
-	SetGravityEnabled(!IsAttached() && !IsAttaching());
+	UpdateAttachmentPhysics(!IsAttached() && !IsAttaching());
 }
 
 void AInteractableActor::DetachAll()
@@ -256,11 +262,33 @@ bool AInteractableActor::AcceptOwnership(uint32 Id)
 	return true;
 }
 
-void AInteractableActor::SetGravityEnabled(bool bEnabled)
+void AInteractableActor::CapturePhysicsState()
 {
+	if (!OriginalPhysicsState.IsEmpty())
+		return;
 	TInlineComponentArray<UPrimitiveComponent*> Primitives(this);
 	for (UPrimitiveComponent* Primitive : Primitives)
-		Primitive->SetEnableGravity(bEnabled);
+		OriginalPhysicsState.Add({Primitive, Primitive->IsSimulatingPhysics(), Primitive->IsGravityEnabled()});
+}
+
+void AInteractableActor::UpdateAttachmentPhysics(bool bRestoreOriginal)
+{
+	if (bRestoreOriginal)
+	{
+		// Restore only after the last grip/session ends, including failure/cancellation.
+		for (const FOriginalPhysicsState& State : OriginalPhysicsState)
+			if (UPrimitiveComponent* Body = State.Body.Get())
+			{
+				if (Body->IsSimulatingPhysics() != State.bSimulating)
+					Body->SetSimulatePhysics(State.bSimulating);
+				Body->SetEnableGravity(State.bGravity);
+			}
+		OriginalPhysicsState.Reset();
+		return;
+	}
+	TInlineComponentArray<UPrimitiveComponent*> Primitives(this);
+	for (UPrimitiveComponent* Primitive : Primitives)
+		Primitive->SetEnableGravity(false);
 }
 
 void AInteractableActor::ResetAttachment(bool bRestorePhysics)
@@ -271,7 +299,7 @@ void AInteractableActor::ResetAttachment(bool bRestorePhysics)
 		for (const TWeakObjectPtr<UPrimitiveComponent>& Primitive : AttachmentSession.SimulatedComponents)
 			if (Primitive.IsValid())
 				Primitive->SetSimulatePhysics(true);
-		SetGravityEnabled(!IsAttached());
+		UpdateAttachmentPhysics(!IsAttached());
 	}
 
 	AttachmentSession = FAttachmentSession();

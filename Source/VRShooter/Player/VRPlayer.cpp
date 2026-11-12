@@ -3,6 +3,10 @@
 
 #include "Player/VRPlayer.h"
 #include "Player/Component/VRController/VRControllerComponent.h"
+#include "Player/Component/VRController/VRViewCameraComponent.h"
+#include "Player/Component/VRController/XRRecenterComponent.h"
+#include "Player/Component/VRController/VRPoseReplicatorComponent.h"
+#include "Player/Component/Locomotion/RoomScaleMovementComponent.h"
 #include "Common/Structs.h"
 #include "Components/SceneComponent.h"
 #include "Camera/CameraComponent.h"
@@ -17,11 +21,17 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "InteractiveSystem/Player/Component/HandSlot.h"
 #include "DrawDebugHelpers.h"
+#include "InteractiveSystem/UI/ArcInteractionUIComponent.h"
 
-AVRPlayer::AVRPlayer() : ABasicPlayer()
+AVRPlayer::AVRPlayer(const FObjectInitializer& ObjectInitializer)
+	: ABasicPlayer(ObjectInitializer
+		.SetDefaultSubobjectClass<URoomScaleMovementComponent>(ACharacter::CharacterMovementComponentName)
+		.SetDefaultSubobjectClass<UVRViewCameraComponent>(TEXT("ActorCamera")))
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickGroup = TG_PostPhysics;
+	bUseControllerRotationYaw = false;
+	GetReplicatedMovement_Mutable().RotationQuantizationLevel = ERotatorQuantization::ShortComponents;
 
 	VROrigin = CreateDefaultSubobject<USceneComponent>(TEXT("VRCameraRoot"));
 	VROrigin->SetupAttachment(GetRootComponent());
@@ -32,6 +42,8 @@ AVRPlayer::AVRPlayer() : ABasicPlayer()
 	VRControllerComponent = CreateDefaultSubobject<UVRControllerComponent>(TEXT("VR controller component"));
 	VRControllerComponent->SetAutoActivate(true);
 	VRControllerComponent->AddTickPrerequisiteComponent(GetCharacterMovement());
+	XRRecenterComponent = CreateDefaultSubobject<UXRRecenterComponent>(TEXT("XRRecenter"));
+	VRPoseReplicator = CreateDefaultSubobject<UVRPoseReplicatorComponent>(TEXT("VRPoseReplicator"));
 
 	// VR Hands
 	LeftMotionController = CreateDefaultSubobject<UMotionControllerComponent>(TEXT("LeftController"));
@@ -51,6 +63,11 @@ AVRPlayer::AVRPlayer() : ABasicPlayer()
 
 	CreateHandSlot(LeftHandSlot, TEXT("Left hand slot"), InteractablePointHand::Left, LeftMotionControllerSimulated);
 	CreateHandSlot(RightHandSlot, TEXT("Right hand slot"), InteractablePointHand::Right, RightMotionControllerSimulated);
+
+	LeftInteractionUI = CreateDefaultSubobject<UArcInteractionUIComponent>(TEXT("LeftInteractionUI"));
+	RightInteractionUI = CreateDefaultSubobject<UArcInteractionUIComponent>(TEXT("RightInteractionUI"));
+	LeftInteractionUI->bFollowHandSelection = true;
+	RightInteractionUI->bFollowHandSelection = true;
 }
 
 void AVRPlayer::Tick(float DeltaTime)
@@ -166,8 +183,9 @@ void FPhysicsBasedHand::SetupPhysicsSettings()
 
 FLocomotionHeightValue AVRPlayer::GetHeightValue() const
 {
-	float Height = GetHMDTransform().GetLocation().Z;
-	FLocomotionHeightValue Result;
+	const auto* Movement = Cast<URoomScaleMovementComponent>(GetCharacterMovement());
+	float Height = IsLocallyControlled() ? XRRecenterComponent->GetTrackingHeight(GetHMDTransform()) : (Movement ? Movement->GetTrackingHeight() : 170.f);
+	FLocomotionHeightValue Result{};
 	Result.bIsVR = true;
 	Result.Height = Height;
 	return Result;
@@ -196,32 +214,91 @@ FTransform AVRPlayer::CalculateSimulatedHandTransform(const FPhysicsBasedHand& H
 
 FTransform AVRPlayer::GetHMDTransform() const
 {
-	if (!GEngine || !GEngine->XRSystem || !GEngine->XRSystem.IsValid())
-		return FTransform::Identity;
+	FTransform Transform;
+	SampleHMDTransform(Transform);
+	return Transform;
+}
 
-	FQuat DeviceRotation;
-	FVector DevicePosition;
+bool AVRPlayer::SampleHMDTransform(FTransform& Transform) const
+{
+	if (!IsLocallyControlled() && VRPoseReplicator->TryGetRemoteHMDTransform(Transform))
+		return VRPoseReplicator->IsRemoteHMDTracked();
+	bool bValid = IsLocallyControlled() && TryGetHMDTransform(Transform);
+	if (IsLocallyControlled())
+		bValid = XRRecenterComponent->PrepareTrackingSample(Transform, bValid, LastHMDTransform);
+	if (bValid)
+		LastHMDTransform = Transform;
+	else
+		Transform = LastHMDTransform;
+	return bValid;
+}
 
-	GEngine->XRSystem->GetCurrentPose(IXRTrackingSystem::HMDDeviceId, DeviceRotation, DevicePosition);
+void AVRPlayer::ResetHMDTrackingCache(float Height)
+{
+	LastHMDTransform = FTransform(FQuat::Identity, FVector(0., 0., Height));
+}
 
-	return FTransform(DeviceRotation, DevicePosition);
+bool AVRPlayer::TryGetHMDTransform(FTransform& Transform) const
+{
+	if (!IsLocallyControlled() || !GEngine || !GEngine->XRSystem.IsValid())
+		return false;
+	FQuat Rotation = FQuat::Identity;
+	FVector Position = FVector::ZeroVector;
+	if (!GEngine->XRSystem->GetCurrentPose(IXRTrackingSystem::HMDDeviceId, Rotation, Position)
+		|| Rotation.ContainsNaN()
+		|| Position.ContainsNaN()
+		|| !Rotation.IsNormalized())
+		return false;
+	Transform = FTransform(Rotation, Position);
+	return true;
+}
+
+FVector AVRPlayer::GetLocomotionVelocity() const
+{
+	const URoomScaleMovementComponent* Movement = Cast<URoomScaleMovementComponent>(GetCharacterMovement());
+	return Movement ? Movement->GetLocomotionVelocity() : GetVelocity();
+}
+
+void AVRPlayer::GatherCurrentMovement()
+{
+	Super::GatherCurrentMovement();
+	if (IsReplicatingMovement())
+		GetReplicatedMovement_Mutable().LinearVelocity = GetLocomotionVelocity();
+}
+
+void AVRPlayer::InitializeLocalTracking()
+{
+	if (IsLocallyControlled()
+		&& GEngine
+		&& GEngine->XRSystem.IsValid()
+		&& GEngine->XRSystem->IsHeadTrackingAllowed())
+		GEngine->XRSystem->SetTrackingOrigin(EHMDTrackingOrigin::Stage);
+}
+
+void AVRPlayer::PawnClientRestart()
+{
+	Super::PawnClientRestart();
+	InitializeLocalTracking();
+}
+
+void AVRPlayer::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+	if (auto* Movement = Cast<URoomScaleMovementComponent>(GetCharacterMovement()))
+		Movement->BeginTrackingStream();
+	InitializeLocalTracking();
 }
 
 void AVRPlayer::BeginPlay()
 {
 	Super::BeginPlay();
 	
-	if (GEngine && GEngine->XRSystem.IsValid() && GEngine->XRSystem->IsHeadTrackingAllowed())
-	{
-		//set tracking origin to stage
-		GEngine->XRSystem->SetTrackingOrigin(EHMDTrackingOrigin::Stage);
-
-		//hide head bone
-		//PublicPlayerMesh->HideBoneByName(FName("head"), EPhysBodyOp::PBO_None);
-	}
+	InitializeLocalTracking();
 
 	LeftHand.SetupPhysicsSettings();
 	RightHand.SetupPhysicsSettings();
+	LeftInteractionUI->Initialize(LeftHandSlot, CameraComponent);
+	RightInteractionUI->Initialize(RightHandSlot, CameraComponent);
 }
 
 // Called to bind functionality to input

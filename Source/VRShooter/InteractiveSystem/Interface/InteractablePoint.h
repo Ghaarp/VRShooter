@@ -27,4 +27,6 @@ public:
 	virtual bool IsInteractionEnabled() const { return true; }
 	virtual AActor* GetPointOwner() const PURE_VIRTUAL(IInteractablePoint::GetPointOwner, return nullptr; );
 	virtual bool IsInventorySlot() const { return false; }
+	/** Localized callout text; empty lets the presentation supply a fallback. */
+	virtual FText GetInteractionDisplayName() const { return FText::GetEmpty(); }
 };

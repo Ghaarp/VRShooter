@@ -9,11 +9,14 @@
 
 class USceneComponent;
 class UVRControllerComponent;
+class UXRRecenterComponent;
+class UVRPoseReplicatorComponent;
 class UMotionControllerComponent;
 class UStaticMeshComponent;
 class UPhysicsConstraintComponent;
 class UCapsuleComponent;
 class UHandSlot;
+class UInteractionUIComponent;
 
 struct FInputActionValue;
 
@@ -83,7 +86,7 @@ class VRSHOOTER_API AVRPlayer : public ABasicPlayer, public IVRControllable
 
 public:
 	// Sets default values for this pawn's properties
-	AVRPlayer();
+	AVRPlayer(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 	virtual void Tick(float DeltaTime) override;
 	FRotator GetHandRayAngleOffset(InteractablePointHand Hand) const;
@@ -103,6 +106,16 @@ public:
 	virtual void AddActorWorldOffset(FVector Offset) override { Super::AddActorWorldOffset(Offset, true); };
 	virtual FTransform GetActorTransform() const override { return Super::GetActorTransform(); }
 	virtual FTransform GetHMDTransform() const override;
+	virtual bool TryGetHMDTransform(FTransform& Transform) const;
+	bool SampleHMDTransform(FTransform& Transform) const;
+	void ResetHMDTrackingCache(float Height);
+	UXRRecenterComponent* GetXRRecenterComponent() const { return XRRecenterComponent; }
+	UVRPoseReplicatorComponent* GetVRPoseReplicator() const { return VRPoseReplicator; }
+	UMotionControllerComponent* GetLeftMotionController() const { return LeftMotionController; }
+	UMotionControllerComponent* GetRightMotionController() const { return RightMotionController; }
+	virtual FVector GetLocomotionVelocity() const override;
+	virtual void PawnClientRestart() override;
+	virtual void PossessedBy(AController* NewController) override;
 
 	virtual float GetIKOffset() const { return IKOffset; };
 	
@@ -117,12 +130,15 @@ protected:
 
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void GatherCurrentMovement() override;
+	void InitializeLocalTracking();
+	mutable FTransform LastHMDTransform = FTransform(FQuat::Identity, FVector(0., 0., 170.));
 	
 	// Properties ---------------------------------------
 	UPROPERTY(EditAnywhere, Category = "VRSettings")
 	FName VRViewSocketName = "VRViewPoint";
 
-	// Local rotation relative to the physical hand; zero points along its +X axis.
+	// Local rotation relative to the physical hand; zero points along its -Z axis.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRSettings|Hand Rays")
 	FRotator LeftHandRayAngleOffset = FRotator::ZeroRotator;
 
@@ -137,6 +153,12 @@ protected:
 	TObjectPtr<UVRControllerComponent> VRControllerComponent;
 
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UXRRecenterComponent> XRRecenterComponent;
+
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UVRPoseReplicatorComponent> VRPoseReplicator;
+
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> MotionControllerRoot;
 
 	// VR Hands -----------------------------------------
@@ -145,6 +167,12 @@ protected:
 
 	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly)
 	TObjectPtr<UHandSlot> RightHandSlot;
+
+	UPROPERTY(Category = "Interaction UI", VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<UInteractionUIComponent> LeftInteractionUI;
+
+	UPROPERTY(Category = "Interaction UI", VisibleAnywhere, BlueprintReadOnly)
+	TObjectPtr<UInteractionUIComponent> RightInteractionUI;
 
 	UPROPERTY(meta = (AllowPrivateAccess = "true"))
 	FPhysicsBasedHand LeftHand;

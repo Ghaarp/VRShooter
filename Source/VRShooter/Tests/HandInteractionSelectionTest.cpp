@@ -14,6 +14,9 @@
 #include "InteractiveSystem/Player/Component/GrabManager.h"
 #include "InteractiveSystem/Player/Component/HandSlot.h"
 #include "InteractiveSystem/Player/Component/InventorySlot.h"
+#include "InteractiveSystem/UI/InteractionUIComponent.h"
+#include "Camera/CameraComponent.h"
+#include "Player/VRPlayer.h"
 
 namespace
 {
@@ -122,6 +125,80 @@ struct FHandSelectionWorld
 	}
 
 };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FHandSelectionUITest, "VRShooter.Interaction.UI.HandSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHandSelectionUITest::RunTest(const FString& Parameters)
+{
+	FHandSelectionWorld Scene;
+	AActor* Player = Scene.AddActor();
+	UHandSlot* Hand = Scene.AddHand(Player);
+	UCameraComponent* Camera = Scene.AddComponent<UCameraComponent>(Player, FVector::ZeroVector);
+	UInteractionUIComponent* UI = NewObject<UInteractionUIComponent>(Player);
+	Player->AddInstanceComponent(UI);
+	UI->RegisterComponent();
+	UI->bFollowHandSelection = true;
+	UI->Initialize(Hand, Camera);
+	UInteractionPoint* Point = Scene.AddPoint(Scene.AddActor(), 50.f, InteractablePointType::Hand);
+	Point->InteractionDisplayName = NSLOCTEXT("InteractionUITest", "Selected", "Selected item");
+	UInteractionPoint* Mount = Scene.AddPoint(Point->GetOwner(), 50.f, InteractablePointType::Outer);
+	UInventorySlot* Slot = Scene.AddSlot(Player, 40.f, InteractablePointType::Outer);
+	Slot->InteractionDisplayName = NSLOCTEXT("InteractionUITest", "Belt", "Belt slot");
+	Scene.BeginPlay();
+	Hand->Activate();
+	TestTrue(TEXT("Selection fixture enables the hand tick like VRPlayer"), Hand->IsComponentTickEnabled());
+	UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Before the first hand tick there is no UI selection"), UI->IsCalloutVisible());
+	Hand->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("UI follows the hand's selected item"), UI->IsCalloutVisible());
+	TestTrue(TEXT("Point text is localized callout text"), UI->ResolveTargetText(Point).EqualTo(Point->InteractionDisplayName));
+	Point->SetRelativeLocation(FVector(500., 0., 0.));
+	UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("UI consumes the cache without another selection query"), UI->IsCalloutVisible());
+	Hand->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Empty hand selection hides the callout"), UI->IsCalloutVisible());
+	SetSelectionOccupancy(Hand, TScriptInterface<IInteractableSlavePoint>(Point));
+	Hand->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Occupied hand selects a compatible inventory destination"), Hand->GetCachedInteractionResult().Point.Get() == Slot);
+	UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("Inventory destination shows a callout"), UI->IsCalloutVisible());
+	TestTrue(TEXT("Inventory text comes from the slot"), UI->ResolveTargetText(Slot).EqualTo(Slot->InteractionDisplayName));
+	Hand->Deactivate();
+	UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Inactive hand hides even with a cached destination"), UI->IsCalloutVisible());
+	Hand->Activate();
+	Slot->DestroyComponent();
+	UI->TickComponent(0.01f, LEVELTICK_All, nullptr);
+	TestFalse(TEXT("Destroyed cached destination hides safely"), UI->IsCalloutVisible());
+	Mount->DestroyComponent();
+	SetSelectionOccupancy(Hand, TScriptInterface<IInteractableSlavePoint>());
+
+	const AVRPlayer* Defaults = GetDefault<AVRPlayer>();
+	TInlineComponentArray<UInteractionUIComponent*> Callouts(Defaults);
+	TestEqual(TEXT("VR player creates one native callout per hand"), Callouts.Num(), 2);
+	for (const UInteractionUIComponent* Callout : Callouts)
+		TestTrue(TEXT("Native callouts follow hand selection"), Callout->bFollowHandSelection);
+	AItemCube* NamedItem = Scene.World->SpawnActor<AItemCube>();
+	Scene.Actors.Add(NamedItem);
+	TestFalse(TEXT("Existing item classes have a localized default name"), NamedItem->InteractionDisplayName.IsEmpty());
+	UInteractionPoint* ItemPoint = NewObject<UInteractionPoint>(NamedItem);
+	TestTrue(TEXT("An unnamed point inherits the item's localized name"),
+		ItemPoint->GetInteractionDisplayName().EqualTo(NamedItem->InteractionDisplayName));
+	ItemPoint->InteractionDisplayName = NSLOCTEXT("InteractionUITest", "Grip", "Grip");
+	TestTrue(TEXT("Point name overrides item name"), ItemPoint->GetInteractionDisplayName().EqualTo(ItemPoint->InteractionDisplayName));
+	UClass* BlueprintClass = LoadClass<AVRPlayer>(nullptr, TEXT("/Game/Player/BP_VRPlayer.BP_VRPlayer_C"));
+	if (TestNotNull(TEXT("Existing VR player Blueprint loads"), BlueprintClass))
+	{
+		TInlineComponentArray<UInteractionUIComponent*> BlueprintCallouts(BlueprintClass->GetDefaultObject<AVRPlayer>());
+		TestEqual(TEXT("Existing Blueprint inherits both native callouts"), BlueprintCallouts.Num(), 2);
+		for (const UInteractionUIComponent* Callout : BlueprintCallouts)
+			TestTrue(TEXT("Inherited callouts enable automatic selection"), Callout->bFollowHandSelection);
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFreeHandSelectionTest, "VRShooter.Interaction.Selection.FreeHand",
@@ -403,7 +480,7 @@ bool FHandRaySelectionTest::RunTest(const FString& Parameters)
 	UStaticMeshComponent* Mesh = CastChecked<UStaticMeshComponent>(Item->GetRootComponent());
 	Mesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
 	Item->SetActorScale3D(FVector(0.2));
-	Item->SetActorLocation(FVector(110., 0., 0.));
+	Item->SetActorLocation(FVector(0., 0., -110.));
 	UInteractionPoint* Main = Scene.AddPoint(Item, 0.f, InteractablePointType::Hand);
 	UInteractionPoint* Other = Scene.AddPoint(Item, 0.f, InteractablePointType::Hand);
 	AActor* NearbyActor = Scene.AddActor();
@@ -424,6 +501,12 @@ bool FHandRaySelectionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("GetMainPoint returns the explicitly marked component"), Cast<IInteractable>(Item)->GetMainPoint() == Main);
 	TestTrue(TEXT("The ray directly selects the MainPoint beyond the grip range"), Hand->FindPointForInteraction().Point.Get() == Main);
 	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+	Main->SetInteractionRange(0.f);
+	TestNull(TEXT("Zero range disables the MainPoint for ray selection"), Hand->FindPointForInteraction().Point.Get());
+	Hand->Grab();
+	TestNull(TEXT("Zero range also rejects the previously cached ray target"), Hand->GetRequestedInteractionPoint());
+	Main->SetInteractionRange(64.f);
+	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
 	Manager->Grab(InteractablePointHand::Left);
 	TestTrue(TEXT("Ray Grab requests the MainPoint rather than another grip"), Hand->GetRequestedInteractionPoint() == Main);
 	TestFalse(TEXT("An item with an in-flight grip is not free"), Item->IsFreeForInteraction());
@@ -439,14 +522,14 @@ bool FHandRaySelectionTest::RunTest(const FString& Parameters)
 	WallBody->SetSphereRadius(5.f);
 	WallBody->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	WallBody->SetCollisionResponseToAllChannels(ECR_Block);
-	Wall->SetActorLocation(FVector(50., 0., 0.));
+	Wall->SetActorLocation(FVector(0., 0., -50.));
 	TestNull(TEXT("The ray does not select an item through a wall"), Hand->FindPointForInteraction().Point.Get());
 	WallBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-	Item->SetActorLocation(FVector(170., 0., 0.));
+	Item->SetActorLocation(FVector(0., 0., -170.));
 	TestNull(TEXT("The ray stops at 150 world centimeters"), Hand->FindPointForInteraction().Point.Get());
 	Item->SetActorLocation(FVector(0., 110., 0.));
-	Player->GetRootComponent()->SetWorldRotation(FRotator(0., 90., 0.));
+	Player->GetRootComponent()->SetWorldRotation(FRotator(90., 90., 0.));
 	TestTrue(TEXT("Ray direction follows the physical hand rotation"), Hand->FindPointForInteraction().Point.Get() == Main);
 	Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
 
@@ -504,6 +587,40 @@ bool FHandCachedGrabTest::RunTest(const FString& Parameters)
 	Manager->Grab(InteractablePointHand::Left);
 	TestTrue(TEXT("The next hand tick updates the cached selection"), Hand->GetRequestedInteractionPoint() == First);
 	Manager->Release(InteractablePointHand::Left);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPendingItemSelectionTest, "VRShooter.Interaction.Selection.PendingItem",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPendingItemSelectionTest::RunTest(const FString& Parameters)
+{
+	FHandSelectionWorld Scene;
+	AActor* Player = Scene.AddActor();
+	UHandSlot* Hand = Scene.AddHand(Player);
+	UHandSlot* OtherHand = Scene.AddHand(Player);
+	AActor* OtherPlayer = Scene.AddActor();
+	UHandSlot* RemoteHand = Scene.AddHand(OtherPlayer);
+	AItemCube* Item = Scene.World->SpawnActor<AItemCube>();
+	Scene.Actors.Add(Item);
+	UInteractionPoint* Near = Scene.AddPoint(Item, 10.f, InteractablePointType::Hand);
+	UInteractionPoint* Reserved = Scene.AddPoint(Item, 20.f, InteractablePointType::Hand);
+	UInteractionPoint* Far = Scene.AddPoint(Scene.AddActor(), 40.f, InteractablePointType::Hand);
+	Scene.BeginPlay();
+	for (UHandSlot* Claimant : {OtherHand, RemoteHand})
+	{
+		Hand->TickComponent(0.f, LEVELTICK_All, nullptr);
+		TestTrue(TEXT("Free nearest item is cached"), Hand->GetCachedInteractionResult().Point.Get() == Near);
+		Reserved->Reserve(Claimant, Item->NextOwnershipId(), false);
+		SetSelectionOccupancy(Claimant, TScriptInterface<IInteractableSlavePoint>(Reserved));
+		TestTrue(TEXT("A pending grip anywhere on the item does not mask a farther target"), Hand->FindPointForInteraction().Point.Get() == Far);
+		Hand->Grab();
+		TestNull(TEXT("Cached grab rechecks item-wide reservation"), Hand->GetRequestedInteractionPoint());
+		Reserved->ConfirmWeld(Claimant, Reserved->GetAttachmentState().AttachmentId);
+		TestTrue(TEXT("A confirmed grip permits another grip or another player's takeover"), Hand->FindPointForInteraction().Point.Get() == Near);
+		Reserved->ReleaseReservation(Claimant);
+		SetSelectionOccupancy(Claimant, nullptr);
+	}
 	return true;
 }
 
