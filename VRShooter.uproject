@@ -3,6 +3,7 @@
 	"EngineAssociation": "5.7",
 	"Category": "",
 	"Description": "",
+	"AdditionalPluginDirectories": [ "Online" ],
 	"Modules": [
 		{
 			"Name": "VRShooterXRBridge",
@@ -21,6 +22,7 @@
 		}
 	],
 	"Plugins": [
+		{ "Name": "VRShooterSteam", "Enabled": true },
 		{
 			"Name": "ModelingToolsEditorMode",
 			"Enabled": true

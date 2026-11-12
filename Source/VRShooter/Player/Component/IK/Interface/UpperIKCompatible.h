@@ -22,6 +22,7 @@ class VRSHOOTER_API IUpperIKCompatible
 
 	// Add interface functions to this class. This is the class that will be inherited to implement this interface.
 public:
+	virtual bool IsUpperBodyIKEnabled() const { return true; }
 
 	virtual FTransform GetLeftHandSimulatedTransform() const PURE_VIRTUAL(IUpperIKCompatible::GetLeftHandSimulatedTransform, return FTransform(););
 	virtual FTransform GetRightHandSimulatedTransform() const PURE_VIRTUAL(IUpperIKCompatible::GetRightHandSimulatedTransform, return FTransform(););

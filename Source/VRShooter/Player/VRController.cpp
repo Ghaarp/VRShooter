@@ -5,6 +5,26 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "Engine/LocalPlayer.h"
+#include "Net/UnrealNetwork.h"
+
+void AVRController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AVRController, LoginPlayerMode);
+}
+
+void AVRController::SetLoginPlayerMode(EPlayerPawnMode Mode)
+{
+	if (HasAuthority())
+		LoginPlayerMode = Mode == EPlayerPawnMode::VR ? EPlayerPawnMode::VR : EPlayerPawnMode::Flat;
+}
+
+void AVRController::SeamlessTravelTo(APlayerController* NewPC)
+{
+	Super::SeamlessTravelTo(NewPC);
+	if (AVRController* NewController = Cast<AVRController>(NewPC))
+		NewController->SetLoginPlayerMode(LoginPlayerMode);
+}
 
 void AVRController::SetupInputComponent()
 {

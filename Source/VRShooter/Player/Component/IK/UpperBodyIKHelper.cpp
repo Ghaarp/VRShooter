@@ -30,6 +30,8 @@ void UUpperBodyIKHelper::BeginPlay()
 		UE_LOG(LogTemp, Warning, TEXT("Unable to setup owner for Upper body IK component."));
 		return;
 	}
+	if (!OwnerInterface->IsUpperBodyIKEnabled())
+		return;
 
 	if (!ClavicleXFunction)
 	{

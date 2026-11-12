@@ -6,16 +6,27 @@
 #include "Animation/UE5Skeleton/ControlRig/Interface/UpperBodyIKCalculator.h"
 #include "Engine/World.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Player/Component/IK/Interface/UpperIKCompatible.h"
 
 bool UFullBodyControlRig::Execute(const FName& InEventName)
 {
 	SetDefaultValues();
+	const IUpperIKCompatible* IKOwner = ParentSkeletalMeshComponent
+		? Cast<IUpperIKCompatible>(ParentSkeletalMeshComponent->GetOwner()) : nullptr;
+	const bool bEnableUpperIK = !IKOwner || IKOwner->IsUpperBodyIKEnabled();
+	// Gate the authored rig branches as well as the native calculator. Restore the
+	// incoming settings after evaluation so preview/owner changes cannot latch them off.
+	TGuardValue<bool> HandsGuard(bUseHandsIK, bUseHandsIK && bEnableUpperIK);
+	TGuardValue<bool> ClavicleGuard(bUseClavicleIK, bUseClavicleIK && bEnableUpperIK);
+	TGuardValue<bool> SpineGuard(bUseSpineIK, bUseSpineIK && bEnableUpperIK);
+	TGuardValue<bool> HeadGuard(bUseHeadIK, bUseHeadIK && bEnableUpperIK);
 
 	if (ParentSkeletalMeshComponent && AnimInstance)
 	{
 		FIKParams IKParams = PrepareIKParams();
 		CalculateLowerBodyIK(IKParams);
-		CalculateUpperBodyIK(IKParams);
+		if (bEnableUpperIK)
+			CalculateUpperBodyIK(IKParams);
 	}
 
 	return Super::Execute(InEventName);
@@ -31,6 +42,8 @@ void UFullBodyControlRig::SetDefaultValues()
 	UpperBodyCalculator = nullptr;
 
 	USceneComponent* Component = OuterSceneComponent.Get();
+	if (!Component)
+		Component = GetTypedOuter<USkeletalMeshComponent>();
 	if (!Component)
 		return;
 

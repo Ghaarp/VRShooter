@@ -1,0 +1,12 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "0.1",
+    "FriendlyName": "VRShooter Steam",
+    "CanContainContent": false,
+    "Modules": [ { "Name": "VRShooterSteam", "Type": "Runtime", "LoadingPhase": "Default" } ],
+    "Plugins": [
+        { "Name": "OnlineSubsystemSteam", "Enabled": true },
+        { "Name": "SteamSockets", "Enabled": true }
+    ]
+}
